@@ -1,0 +1,134 @@
+# The epilogue: C = alpha * A * B + beta * C + bias, then a post-op chain
+# (`postop` is a native post-op scaling the result by 4). Every feature set over
+# the data types (a float f64 uses runtime scalars: a 64-bit literal other than
+# 0 and 1 does not fit an immediate), the literal-folding values, the runtime
+# flag word and its subsets, K-blocked call sequences and the register budget
+
+# Feature sets over the data types, shape sources and transposes
+--reset
+--post=none,alpha,beta,bias,postop,alpha+beta,alpha+bias,beta+bias,alpha+beta+bias,alpha+beta+bias+postop
+--dt=f32,s32,u8,s8:s8:s16,f16:f16:f32,bf16:bf16:f32
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"postop_features"
+
+--reset
+--post=alpha+beta+bias+postop
+--dt=f64
+--scalar=runtime
+--shape=literal,runtime --transA=0,1
+3v+1x5x9_n"postop_f64"
+
+# Literal alpha and beta fold: 0 clears or skips, 1 drops or adds unscaled
+--reset
+--post=alpha,beta,alpha+beta,alpha+beta+bias
+--dt=f32,s32,f16:f16:f32
+--alpha=0,1,2 --beta=0,1,3
+3v+1x5x9_n"postop_literal_folding"
+
+# Runtime scalars, with zero and one values
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s32,s8:s8:s16,f16:f16:f32
+--scalar=runtime --alpha=0,1,2 --beta=0,1,3
+3v+1x5x9_n"postop_runtime_scalars"
+
+# The runtime flag word and its subsets, and a literal word
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s32,f16:f16:f32
+--scalar=runtime --rt=runtime
+--rtmask=-1,0,1,2,4,8,5,6,10,15
+3v+1x5x9_n"postop_runtime_flags"
+
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s32
+--alpha=2 --beta=0,3 --rt=literal
+--rtmask=-1,0,5,6,10
+3v+1x5x9_n"postop_literal_flags"
+
+# Chunked and blocked drivers advance the bias with every M chunk
+--reset
+--post=bias,alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--shape=less_eq --m_max=2v --n_max=3
+--scalar=runtime --rt=runtime
+3v+1x5x9_n"postop_chunks"
+
+--reset
+--expect=any
+--post=bias,alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--shape=blocked --m_blk=2v --n_blk=3
+--scalar=runtime --rt=runtime
+3v+1x5x9_n"postop_blocked"
+
+# M dispatched once (a literal tile, or a chunk within one tile) has no M offset
+--reset
+--post=bias,beta+bias,alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--shape=literal,less_eq --m_max=v --n_max=64
+--scalar=literal,runtime --rt=none,runtime
+vx5x3_n"postop_single_tile"
+vx37x29_n"postop_single_tile_n_tiles"
+v-3x5x3_n"postop_partial_tile"
+
+# Several M vectors per tile: one bias vector each
+--reset
+--post=bias,beta+bias,alpha+beta+bias+postop
+--dt=f32,f16:f16:f32
+--shape=literal,blocked --m_blk=2v --n_blk=2
+8v+3x4x6_n"postop_m_tiles"
+
+# K split over several calls: the first applies the user's beta, the later ones
+# accumulate, and the last one adds the bias and runs the post-op
+--reset
+--post=alpha+beta,alpha+beta+bias,beta+bias+postop,alpha+beta+bias+postop
+--dt=f32,s32,f64,s8:s8:s16,f16:f16:f32
+--scalar=runtime --rt=runtime --kshape=runtime
+--alpha=1,2 --beta=0,3 --kblock=3,4
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"postop_kblock"
+
+# Every feature under a shrinking integer register budget
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--scalar=runtime --rt=runtime
+--max_int_regs=12,14,16,24
+--shape=literal,runtime --transA=0,1
+3v+1x7x9_n"postop_register_pressure"
+
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--scalar=runtime --rt=runtime
+--max_int_regs=10 --shape=literal --transA=0,1
+3v+1x7x9_n"postop_register_pressure_literal"
+
+# Runtime M and N fit 10 integer registers, 9 with an untransposed A: the
+# epilogue and the loops' frame steps reuse the K phase's registers, and s8
+# also needs the K phase to borrow the C pointer and the M offset, saved on
+# the stack around it
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--scalar=runtime --rt=runtime
+--max_int_regs=10 --shape=runtime --transA=0,1
+3v+1x7x9_n"postop_register_pressure_runtime"
+
+--reset
+--post=alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--scalar=runtime --rt=runtime
+--max_int_regs=9 --shape=runtime --transA=0
+3v+1x7x9_n"postop_register_pressure_runtime"
+
+# With 8 integer registers they do not fit
+--reset
+--expect=reject
+--post=alpha+beta+bias+postop
+--dt=f32,s8:s8:s16
+--scalar=runtime --rt=runtime
+--max_int_regs=8 --shape=runtime --transA=0,1
+3v+1x7x9_n"postop_register_pressure_rejected"

@@ -1,0 +1,25 @@
+# Large unrolled bodies: the outer loops' branches must reach over the whole
+# M/N/K nest (the loops' estimated body size selects a medium branch distance)
+#
+# Many M tiles at the narrowest LMUL
+--reset
+--lmul=1 --shape=blocked --m_blk=8v --n_blk=3
+8v+1x9x11_n"lmul1_blocked_many_tiles"
+
+# An N bound well above N, and the widest N unroll the backend takes
+--reset
+--shape=less_eq --m_max=v --n_max=16
+3vx7x13_n"less_eq_n_bound_far_above_n"
+--shape=less_eq --m_max=2v --n_max=16 --lmul=1,2,4,8 --expect=any
+3v+1x19x20_n"less_eq_wide_n_every_lmul"
+
+# Blocked N at the widest unroll: only LMUL 1 holds 16 accumulators; a larger
+# LMUL exceeds the accumulator ceiling and the blocked request is rejected
+--reset
+--expect=any
+--shape=blocked --m_blk=2v --n_blk=16 --lmul=1
+2v+1x17x16_n"blocked_wide_n_lmul1"
+
+--reset
+--shape=blocked --m_blk=2v --n_blk=16 --lmul=2,4,8 --expect=reject
+2v+1x17x16_n"blocked_wide_n_rejected"

@@ -1,0 +1,20 @@
+# Curated correctness-only selection, registered as a CTest target per VLEN
+# (see bench/matmul/CMakeLists.txt) -- fast, one representative case per code
+# path family. Never add --mode=P or a wide sweep here: that belongs in
+# test_matmul_all, run manually via bench/scripts/run_matmul_perf.sh, since
+# QEMU timings aren't representative of real hardware.
+--batch=harness_m_tiling
+--batch=harness_loop_boundary
+--batch=harness_register_pressure
+--batch=harness_transb_pivot
+--batch=harness_m_unroll
+--batch=harness_runtime_tails
+--batch=harness_shape_sources
+--batch=harness_ld_sources
+--batch=harness_lmul_unroll
+--batch=harness_branch_distance
+--batch=harness_dtypes
+--batch=harness_dtype_lmul
+--batch=harness_postops
+--batch=harness_narrowing
+--batch=harness_extended_b

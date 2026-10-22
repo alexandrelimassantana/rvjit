@@ -1,0 +1,31 @@
+# Every data type the backend supports, uniform and widening (input x input
+# accumulating into a wider output), over the M/N shape sources and the
+# transposes. f16/bf16 cases are skipped on machines lacking the half-precision
+# vector extensions. Float outputs compare under a tolerance scaled by K and
+# the output's precision, integer outputs exactly
+--reset
+--dt=f32,f64,f16,s8,s16,s32,u8
+--shape=literal,blocked,less_eq,runtime --m_blk=2v --n_blk=3 --m_max=2v --n_max=3
+--transA=0,1 --transB=0,1
+3v+1x5x9_n"dtype_uniform"
+
+--reset
+--dt=f16:f32,bf16:f32,f32:f64,s8:s16,s16:s32,u8:u16,u16:s32,s32:s64
+--shape=literal,blocked,less_eq,runtime --m_blk=2v --n_blk=3 --m_max=2v --n_max=3
+--transA=0,1 --transB=0,1
+3v+1x5x9_n"dtype_widening"
+
+# Mixed-sign integer inputs
+--reset
+--dt=s8:u8:s16,u8:s8:s16
+--shape=literal,blocked,less_eq,runtime --m_blk=2v --n_blk=3 --m_max=2v --n_max=3
+--transA=0,1 --transB=0,1
+3v+1x5x9_n"dtype_mixed_sign"
+
+# K sources and padded runtime strides at each element width
+--reset
+--dt=f16,f16:f32,bf16:f32,s8:s16,f64
+--kshape=literal,runtime,blocked --k_blk=4
+--ld=literal,runtime
+--lda=3v+3 --ldb=17 --ldc=3v+5
+v+5x7x13_n"dtype_k_and_strides"

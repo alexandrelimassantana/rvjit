@@ -1,0 +1,44 @@
+# Build
+build/
+cmake-build-*/
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+
+# AI agents
+.claude/
+CLAUDE.md
+.cursor/
+.cursorrules
+.aider*
+.continue/
+.windsurf/
+.clinerules/
+.amazonq/
+
+# IDE
+.vscode/
+.idea/
+.vs/
+*.code-workspace
+.clangd/
+.cache/
+.ccls-cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor swap/backup files
+*~
+*.swp
+*.swo
+
+# Misc
+*.log
+/core
+
+# Dump
+dump/

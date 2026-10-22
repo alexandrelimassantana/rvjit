@@ -1,0 +1,16 @@
+# Leading-dimension sources (literal baked in, runtime loaded from the args
+# structure) over packed and padded layouts. A padded ld leaves gaps the
+# kernel must neither read nor write.
+--reset
+--ld=literal,runtime --transA=0,1 --transB=0,1
+v+5x7x13_n"ld_packed"
+
+--reset
+--ld=literal,runtime --transA=0,1 --transB=0,1
+--lda=3v+3 --ldb=17 --ldc=3v+5
+v+5x7x13_n"ld_padded"
+
+--reset
+--ld=literal,runtime --shape=less_eq --m_max=v --n_max=3
+--lda=3v+3 --ldb=17 --ldc=3v+5 --transB=1
+2vx7x13_n"ld_padded_less_eq"

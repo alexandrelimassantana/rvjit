@@ -1,0 +1,198 @@
+# Outputs narrower than the accumulators: the products accumulate wide and
+# the accumulators are narrowed as they are stored (floats round to nearest
+# even, integers saturate), the previous C is widened when beta applies, and
+# bias and the scalars take the accumulation type. Every type pair over the
+# epilogue features, the shape sources, the transposes, M tails and the
+# register budget. --kblock is not combined: it rounds C once per call
+
+# f16:f16:f16 accumulating in f32
+--reset
+--dt=f16:f16:f16 --acc=f32
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_f16_features"
+
+--reset
+--dt=f16:f16:f16 --acc=f32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_f16_sources"
+
+# bf16:bf16:bf16 accumulating in f32
+--reset
+--dt=bf16:bf16:bf16 --acc=f32
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_bf16_features"
+
+--reset
+--dt=bf16:bf16:bf16 --acc=f32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_bf16_sources"
+
+# f32:f32:f16 accumulating in f32
+--reset
+--dt=f32:f32:f16 --acc=f32
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_uf16_features"
+
+--reset
+--dt=f32:f32:f16 --acc=f32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_uf16_sources"
+
+# f32:f32:bf16 accumulating in f32
+--reset
+--dt=f32:f32:bf16 --acc=f32
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_ubf16_features"
+
+--reset
+--dt=f32:f32:bf16 --acc=f32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_ubf16_sources"
+
+# f64:f64:f32 accumulating in f64
+--reset
+--dt=f64:f64:f32 --acc=f64
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_f64_features"
+
+--reset
+--dt=f64:f64:f32 --acc=f64
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_f64_sources"
+
+# s8:s8:s8 accumulating in s16
+--reset
+--dt=s8:s8:s8 --acc=s16
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_s8_features"
+
+--reset
+--dt=s8:s8:s8 --acc=s16
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_s8_sources"
+
+# u8:u8:u8 accumulating in u16
+--reset
+--dt=u8:u8:u8 --acc=u16
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_u8_features"
+
+--reset
+--dt=u8:u8:u8 --acc=u16
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_u8_sources"
+
+# s16:s16:s16 accumulating in s32
+--reset
+--dt=s16:s16:s16 --acc=s32
+--scalar=runtime
+--post=none,alpha,beta,bias,postop,alpha+beta,beta+bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"narrow_s16_features"
+
+--reset
+--dt=s16:s16:s16 --acc=s32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"narrow_s16_sources"
+
+--reset
+--dt=f16:f16:f16 --acc=f32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+1x1x1_n"narrow_f16_tiny"
+2v+3x3x3_n"narrow_f16_small"
+5v+2x2x30_n"narrow_f16_unroll_m"
+v+7x40x4_n"narrow_f16_wide_n"
+
+--reset
+--dt=f16:f16:f16 --acc=f32
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--rtmask=-1,0,1,2,4,8,6,10
+3v+1x5x9_n"narrow_f16_runtime_flags"
+
+--reset
+--dt=s8:s8:s8 --acc=s16
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+1x1x1_n"narrow_s8_tiny"
+2v+3x3x3_n"narrow_s8_small"
+5v+2x2x30_n"narrow_s8_unroll_m"
+v+7x40x4_n"narrow_s8_wide_n"
+
+--reset
+--dt=s8:s8:s8 --acc=s16
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--rtmask=-1,0,1,2,4,8,6,10
+3v+1x5x9_n"narrow_s8_runtime_flags"
+
+--reset
+--dt=f64:f64:f32 --acc=f64
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+1x1x1_n"narrow_f64_tiny"
+2v+3x3x3_n"narrow_f64_small"
+5v+2x2x30_n"narrow_f64_unroll_m"
+v+7x40x4_n"narrow_f64_wide_n"
+
+--reset
+--dt=f64:f64:f32 --acc=f64
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--rtmask=-1,0,1,2,4,8,6,10
+3v+1x5x9_n"narrow_f64_runtime_flags"
+
+--reset
+--dt=f16:f16:f16 --acc=f32
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--max_int_regs=12,14,16,24
+--shape=literal,runtime
+3v+1x7x9_n"narrow_f16_register_pressure"
+
+--reset
+--dt=s8:s8:s8 --acc=s16
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--max_int_regs=12,14,16,24
+--shape=literal,runtime
+3v+1x7x9_n"narrow_s8_register_pressure"

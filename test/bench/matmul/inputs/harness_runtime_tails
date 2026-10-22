@@ -1,0 +1,33 @@
+# Runtime M unrolling (rvv::matmul_t's m_block)
+#
+# N takes its accumulators first; an unbounded M unrolls over the vector
+# groups left, up to 4 tiles, exactly as a large literal does. A narrow N at
+# a small LMUL leaves those groups, so M runs its main stage and every tail
+# stage of {4, 2, 1}, then a partial last vector; the runtime and literal
+# kernels must agree on all of them.
+--reset
+--lmul=1,2
+--shape=literal,runtime
+1x1x9_n"one_element"
+v-1x1x9_n"below_one_tile"
+4vx1x9_n"one_main_stage"
+4v+1x2x9_n"main_and_partial"
+5vx1x9_n"main_and_one"
+6v+3x2x9_n"main_two_and_partial"
+7vx3x9_n"main_two_and_one"
+11v+5x1x33_n"main_twice_and_tails"
+
+# The tails under runtime strides, K below the unroll and the epilogue,
+# which reads the M offset of every tile
+--reset
+--lmul=1
+--shape=runtime --ld=runtime --kshape=literal,runtime
+7v+5x2x3_n"short_k"
+--post=alpha+beta+bias --alpha=2 --beta=0.5
+7v+5x2x17_n"epilogue"
+
+# Transposed operands keep their own M stride
+--reset
+--lmul=2
+--shape=literal,runtime --transA=0,1 --transB=0,1
+6v+3x2x9_n"transposed"

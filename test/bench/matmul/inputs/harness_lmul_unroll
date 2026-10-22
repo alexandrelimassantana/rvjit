@@ -1,0 +1,28 @@
+# Every LMUL against every size source: the blocked/less_eq values steer the
+# backend's unrolls. The backend may reject a request it cannot fit.
+--reset
+--lmul=1,2,4,8 --expect=any
+--shape=literal,blocked,runtime --m_blk=2v --n_blk=3
+3v+1x9x11_n"lmul_x_source"
+
+--reset
+--lmul=1,2,4,8 --expect=any
+--shape=less_eq --m_max=2v --n_max=3
+3v+1x9x11_n"lmul_x_less_eq"
+
+--reset
+--expect=any
+--shape=blocked --m_blk=v,2v --n_blk=1,2
+--lmul=1,2,4,8
+2v+6x4x16_n"lmul_x_blocked"
+
+--reset
+--expect=any
+--shape=blocked --m_blk=v,2v --n_blk=4
+--lmul=1,2,4
+2v+6x4x16_n"lmul_x_blocked_n4"
+
+# Four blocked accumulators at LMUL 8 exceed the accumulator ceiling
+--reset
+--shape=blocked --m_blk=v,2v --n_blk=4 --lmul=8 --expect=reject
+2v+6x4x16_n"lmul_x_blocked_rejected"

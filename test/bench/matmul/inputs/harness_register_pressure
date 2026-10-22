@@ -1,0 +1,24 @@
+# Tiered register allocation (shed / borrow / direct-fallback)
+#
+# rvv_matmul_engine_t::configure() allocates its general-purpose scratch
+# registers through a tiered search: try everything at full cost with B
+# addressed via `pivot`, shed registers (outermost bookkeeping first, the
+# innermost K-loop's own re-arm register last) if that doesn't fit, then
+# retry the whole ladder with B via `direct` if shedding still isn't enough.
+# max_int_regs artificially caps the int register pool so that search is
+# actually forced into specific rungs, rather than trivially succeeding at
+# level 0 the way every shape in the other harness files does with the
+# default ~24-register pool.
+# The three operand pointers are loaded into pool registers (from the args
+# structure), so each cap includes those three.
+--reset
+--max_int_regs=10
+64x128x32_n"register_tight_tile_base_demotion"
+
+--reset
+--transB=1 --max_int_regs=11
+64x128x32_n"register_tight_direct_fallback"
+
+--reset
+--transA=1 --transB=1 --max_int_regs=12
+64x128x32_n"register_tight_transab_direct_fallback"

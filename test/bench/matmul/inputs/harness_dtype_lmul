@@ -1,0 +1,35 @@
+# Every LMUL against every data type: a widening output takes twice the input
+# LMUL (or more), so widening is covered up to the largest input LMUL whose
+# accumulators still fit a group of at most 8 registers
+--reset
+--dt=f32,f16,s8
+--lmul=1,2,4,8
+--shape=literal,less_eq --m_max=2v --n_max=3
+3v+1x5x9_n"dtype_x_lmul"
+
+# A pinned block the registers cannot hold is rejected
+--reset
+--expect=any
+--dt=f32,f16,s8
+--lmul=1,2,4,8
+--shape=blocked --m_blk=2v --n_blk=3
+3v+1x5x9_n"dtype_x_lmul_blocked"
+
+--reset
+--dt=f16:f32,bf16:f32,s8:s16,f32:f64
+--lmul=1,2,4
+--shape=literal,less_eq --m_max=2v --n_max=3
+3v+1x5x9_n"dtype_x_lmul_widening"
+
+--reset
+--expect=any
+--dt=f16:f32,bf16:f32,s8:s16,f32:f64
+--lmul=1,2,4
+--shape=blocked --m_blk=2v --n_blk=3
+3v+1x5x9_n"dtype_x_lmul_widening_blocked"
+
+# A widening output at input LMUL 8 would need 16 registers per group
+--reset
+--dt=f16:f32
+--lmul=8 --expect=reject
+3v+1x5x9_n"widening_lmul8_is_rejected"

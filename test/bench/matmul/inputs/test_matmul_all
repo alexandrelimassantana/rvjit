@@ -1,0 +1,19 @@
+# Full sweep -- manual/local use only (bench/scripts/run_matmul.sh or
+# run_matmul_perf.sh), never registered as a CTest target: broader coverage
+# and the tuning-knob sweep make this slower than what should gate a PR.
+--batch=harness_m_tiling
+--batch=harness_loop_boundary
+--batch=harness_register_pressure
+--batch=harness_transb_pivot
+--batch=harness_unroll_tuning
+--batch=harness_m_unroll
+--batch=harness_runtime_tails
+--batch=harness_shape_sources
+--batch=harness_ld_sources
+--batch=harness_lmul_unroll
+--batch=harness_branch_distance
+--batch=harness_dtypes
+--batch=harness_dtype_lmul
+--batch=harness_postops
+--batch=harness_narrowing
+--batch=harness_extended_b

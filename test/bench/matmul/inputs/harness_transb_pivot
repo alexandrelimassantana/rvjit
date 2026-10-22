@@ -1,0 +1,17 @@
+# B's pivot-addressing resolution
+#
+# Transposed B makes K's own stride ldb-sized (= N * element size) instead
+# of element-sized, which changes how iterator_stream_t::try_plan_nd
+# resolves K's pivot chain as N grows -- these two shapes pin down that
+# resolution at opposite ends: multi_ntile_init lands K's pivot axis in the
+# single-pivot-register branch (regression case for a real corruption bug,
+# fixed by iterator_nd_t::emit_init_() only running an axis's own init step
+# on its first visit), multi_strip lands it in the multi-strip chain with a
+# materialized inter-pivot stride instead.
+--reset
+--transB=1
+64x64x32_n"transb_pivot_multi_ntile_init"
+
+--reset
+--transB=1
+64x128x32_n"transb_pivot_multi_strip"

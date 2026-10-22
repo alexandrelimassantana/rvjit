@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions: read-all
+
+jobs:
+  clang-format:
+    name: Clang-Format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
+
+      - name: Check code formatting
+        run: .github/automation/clang-format.sh
+
+  build-and-test:
+    name: RV64 build & test (gcc-14)
+    runs-on: ubuntu-24.04
+    # The runner's qemu-user (8.2) SIGILLs on Zvfh/Zvfbfwma; 26.04's runs them.
+    container:
+      image: ubuntu:26.04
+    steps:
+      # actions/checkout needs git, which the bare image lacks.
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq git ca-certificates
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install RV64 cross toolchain and QEMU
+        run: .github/automation/install.sh
+
+      - name: Build
+        run: .github/automation/build.sh build
+
+      - name: Test
+        run: .github/automation/test.sh build
+
+  docs:
+    name: Doxygen build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Doxygen and Graphviz
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq doxygen graphviz
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -DRVJIT_BUILD_DOCS=ON \
+            -DRVJIT_BUILD_TESTS=OFF -DRVJIT_BUILD_BENCH=OFF
+
+      - name: Build docs
+        run: cmake --build build --target rvjit_docs
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/docs/html
+
+  deploy-docs:
+    name: Deploy docs to GitHub Pages
+    needs: docs
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

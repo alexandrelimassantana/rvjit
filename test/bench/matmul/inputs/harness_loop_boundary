@@ -1,0 +1,19 @@
+# Loop-boundary edge cases: M/N/K not multiples of VLMAX/unroll factors,
+# forcing tail chunks and tail tiles.
+--reset
+17x5x13_n"non_vlmax_multiple"
+
+--reset
+--transA=1 --transB=1
+17x5x13_n"non_vlmax_multiple_transab"
+
+# Extreme aspect ratios -- one dimension collapsed to (near-)1, exercising
+# degenerate N/K/M-loop trip counts a "nicely square" shape never reaches.
+--reset
+64x1x16_n"skinny_n"
+
+--reset
+1x8x16_n"skinny_m"
+
+--reset
+8x8x2_n"skinny_k"

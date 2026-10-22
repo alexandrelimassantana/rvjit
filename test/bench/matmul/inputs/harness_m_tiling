@@ -1,0 +1,28 @@
+# M-tiling / transpose baseline
+#
+# The four is_transa/is_transb combinations at a shape that spans multiple
+# M-tiles (has_m_loop_, non-literal m_loop). m_tiles is also the regression
+# case for the eager-ptrb M-tile-base stack-coalescing bug (fixed by giving
+# eager B its own variable_t(pointer_t) slot); the transA=1 case covers the
+# runtime-lda mul/nb_tmp_ path in the M-tile-base update.
+--reset
+--transA=0,1 --transB=0,1
+64x8x16_n"m_tiles"
+
+# Scaling sanity: bigger than the baseline group (more M-tiles, larger N/K),
+# untransposed and transposed-A+B, to catch anything that only shows up once
+# the dense loops actually iterate more than a couple of times.
+--reset
+96x12x24_n"larger_square_untransposed"
+
+--reset
+--transA=1 --transB=1
+96x12x24_n"larger_square_transab"
+
+--reset
+128x16x32_n"large_untransposed"
+
+# M == VLMAX exactly: a single M-tile, but still through the has_m_loop_
+# (non-literal m_loop) path rather than a literal single-tile path.
+--reset
+16x4x8_n"single_m_tile"

@@ -1,0 +1,53 @@
+# Operands converted between memory and the registers: A widened or extended
+# as it is loaded, an integer accumulation scaled in a float epilogue and
+# stored to 8-bit or half-precision outputs (rounding to nearest even and
+# saturating), and a bias of its own type or a single element for every M
+
+# f16 and bf16 weights computed in f32
+--reset
+--dt=f16:f32:f32 --areg=f32
+--post=none,alpha+beta+bias --scalar=runtime
+--shape=literal,runtime --transA=0,1 --transB=0,1
+2v+3x5x9_n"decompress_f16"
+
+--reset
+--dt=bf16:f32:f32 --areg=f32
+--post=none,bias
+2v+3x5x9_n"decompress_bf16"
+
+# s8 x s8 accumulating in s32, both extended to s32 as they are loaded
+--reset
+--dt=s8:s8:s32 --areg=s32 --breg=s32 --acc=s32
+--post=none,beta,bias --transA=0,1
+2v+3x7x33_n"int8_s32"
+
+# The s32 accumulation scaled in f32 and stored to f32, s8, u8 and f16
+--reset
+--dt=s8:s8:f32 --areg=s32 --breg=s32 --acc=s32 --epi=f32
+--post=none,alpha+beta+bias --scalar=runtime --rt=runtime
+2v+3x7x33_n"int8_f32"
+
+--reset
+--dt=s8:s8:s8 --areg=s32 --breg=s32 --acc=s32 --epi=f32
+--post=none,alpha,bias,alpha+bias --alpha=0.37
+2v+3x7x33_n"int8_s8"
+
+--reset
+--dt=u8:u8:u8 --areg=s32 --breg=s32 --acc=s32 --epi=f32
+--post=none,alpha+bias --alpha=0.2
+2v+3x7x33_n"int8_u8"
+
+--reset
+--dt=s8:s8:f16 --areg=s32 --breg=s32 --acc=s32 --epi=f32
+--post=alpha+bias --alpha=0.5
+2v+3x7x33_n"int8_f16"
+
+# A single bias element for every M, and bias arrays of other types
+--reset
+--dt=f32 --post=bias,alpha+beta+bias --bias_kind=scalar
+--scalar=runtime --rt=runtime
+2v+3x5x9_n"scalar_bias"
+
+--reset
+--dt=f32 --post=bias --bias_dt=bf16,f16 --bias_kind=per_m,scalar
+2v+3x5x9_n"typed_bias"

@@ -1,0 +1,26 @@
+# Engine tuning knobs: the same shape, K and N blocked sizes swept
+# explicitly instead of left at 0 (engine-decided) -- correctness must hold
+# at every explicit value, and running with --mode=P compares GFLOPS across
+# them to see whether a given override actually helps.
+#
+# K is blocked via --kshape (a literal M/N stay baked into the kernel); N is
+# blocked via --shape, which blocks M as well, so M gets one block as large as
+# the shape itself.
+--reset
+--kshape=blocked --k_blk=1,2,4,8
+128x16x64_n"k_blk_sweep"
+
+--reset
+--expect=any
+--shape=blocked --m_blk=128 --n_blk=1,2,4
+128x16x64_n"n_blk_sweep"
+
+--reset
+--expect=any
+--shape=blocked --m_blk=128 --n_blk=8 --lmul=1,2
+128x16x64_n"n_blk_wide_sweep"
+
+# Eight blocked accumulators exceed the ceiling of six at LMUL 4
+--reset
+--shape=blocked --m_blk=128 --n_blk=8 --lmul=4 --expect=reject
+128x16x64_n"n_blk_wide_rejected"

@@ -1,0 +1,62 @@
+# M-loop unrolling (rvv::matmul_t's m_block)
+#
+# The vector tiles of M are unrolled with whatever vector registers remain
+# after N's accumulators and A's double buffer, up to 4 tiles. --lmul pins
+# the register grouping so those leftovers are predictable: at LMUL=8 only 4
+# groups exist (N=1 leaves one for a second M tile); at LMUL=2 there are 16
+# (N=7 leaves room for exactly 2 tiles, N=1 for as many as M has, up to 4).
+--reset
+--lmul=8
+64x1x16_n"lmul8_n1_two_tiles"
+96x1x16_n"lmul8_n1_tail_tile"
+100x1x33_n"lmul8_n1_unaligned_m"
+
+--reset
+--lmul=2
+64x1x16_n"lmul2_n1_all_tiles"
+256x1x16_n"lmul2_n1_capped_tiles"
+64x4x20_n"lmul2_n4_three_tiles_and_tail"
+64x7x33_n"lmul2_n7_two_tiles"
+70x7x16_n"lmul2_n7_unaligned_m"
+64x8x16_n"lmul2_n8_no_room"
+
+--reset
+--lmul=2 --transB=1
+64x4x20_n"lmul2_n4_transb"
+70x7x33_n"lmul2_n7_transb"
+
+# Transposed A takes a strided load, so M keeps a single tile
+--reset
+--lmul=2 --transA=1
+64x4x20_n"lmul2_transa_single_tile"
+
+# A blocked M unrolls up to its block size
+# Blocked M values are element counts handed to the backend as-is (at LMUL=2
+# a vector tile is VLEN/16 elements, at LMUL=8 VLEN/4)
+--reset
+--lmul=2 --shape=blocked --m_blk=32 --n_blk=1
+64x1x16_n"lmul2_blocked_m_four_tiles"
+
+--reset
+--lmul=2 --shape=blocked --m_blk=32 --n_blk=3
+100x3x20_n"lmul2_blocked_m_n3"
+
+--reset
+--lmul=8 --shape=blocked --m_blk=64 --n_blk=1
+100x1x20_n"lmul8_blocked_m_two_tiles"
+
+# M smaller than two tiles has nothing to unroll
+--reset
+--lmul=2
+8x2x16_n"lmul2_single_tile_m"
+
+# Default LMUL with a small N
+--reset
+16x1x16_n"default_lmul_n1"
+64x2x20_n"default_lmul_n2"
+
+# The tiers can't always afford an unrolled M's extra integer registers; the
+# plan then falls back to a single tile
+--reset
+--lmul=2 --max_int_regs=11
+64x4x20_n"lmul2_tight_int_regs_fallback"

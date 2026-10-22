@@ -1,0 +1,126 @@
+# B read from memory narrower than the type the multiply-accumulate sees: the
+# scalar load extends each element (lb/lbu, lh) into the register, so a byte B
+# multiplies into a uniform s32 or s16 accumulation. Strides and the load
+# follow B's memory type; the extension is visible in the data (negative s8,
+# u8 above 127). Epilogue features, transposes (B's offsets in 1-byte
+# elements through pivot and guided), shape sources, tails, the flag word and
+# the register budget
+
+# s32:s8:s32 with B extended to s32
+--reset
+--dt=s32:s8:s32 --breg=s32
+--scalar=runtime
+--post=none,alpha,beta,bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"extb_s8_features"
+
+--reset
+--dt=s32:s8:s32 --breg=s32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"extb_s8_sources"
+
+--reset
+--dt=s32:s8:s32 --breg=s32
+--post=none,beta,alpha+beta+bias+postop
+--scalar=runtime
+1x1x1_n"extb_s8_tiny"
+2v+3x3x3_n"extb_s8_small"
+5v+2x2x30_n"extb_s8_unroll_m"
+v+7x40x4_n"extb_s8_wide_n"
+3v+1x23x64_n"extb_s8_long_k"
+
+# s32:u8:s32 with B extended to s32
+--reset
+--dt=s32:u8:s32 --breg=s32
+--scalar=runtime
+--post=none,alpha,beta,bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"extb_u8_features"
+
+--reset
+--dt=s32:u8:s32 --breg=s32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"extb_u8_sources"
+
+--reset
+--dt=s32:u8:s32 --breg=s32
+--post=none,beta,alpha+beta+bias+postop
+--scalar=runtime
+1x1x1_n"extb_u8_tiny"
+2v+3x3x3_n"extb_u8_small"
+5v+2x2x30_n"extb_u8_unroll_m"
+v+7x40x4_n"extb_u8_wide_n"
+3v+1x23x64_n"extb_u8_long_k"
+
+# s32:s16:s32 with B extended to s32
+--reset
+--dt=s32:s16:s32 --breg=s32
+--scalar=runtime
+--post=none,alpha,beta,bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"extb_s16_features"
+
+--reset
+--dt=s32:s16:s32 --breg=s32
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"extb_s16_sources"
+
+--reset
+--dt=s32:s16:s32 --breg=s32
+--post=none,beta,alpha+beta+bias+postop
+--scalar=runtime
+1x1x1_n"extb_s16_tiny"
+2v+3x3x3_n"extb_s16_small"
+5v+2x2x30_n"extb_s16_unroll_m"
+v+7x40x4_n"extb_s16_wide_n"
+3v+1x23x64_n"extb_s16_long_k"
+
+# s16:s8:s16 with B extended to s16
+--reset
+--dt=s16:s8:s16 --breg=s16
+--scalar=runtime
+--post=none,alpha,beta,bias,alpha+beta+bias+postop
+--shape=literal,runtime --transA=0,1 --transB=0,1
+3v+1x5x9_n"extb_s8_features"
+
+--reset
+--dt=s16:s8:s16 --breg=s16
+--scalar=runtime
+--post=none,beta,bias,alpha+beta+bias+postop
+--shape=literal,less_eq,runtime --kshape=literal,runtime
+--m_max=3v+1 --n_max=7 --k_max=20
+3v+1x7x20_n"extb_s8_sources"
+
+--reset
+--dt=s16:s8:s16 --breg=s16
+--post=none,beta,alpha+beta+bias+postop
+--scalar=runtime
+1x1x1_n"extb_s8_tiny"
+2v+3x3x3_n"extb_s8_small"
+5v+2x2x30_n"extb_s8_unroll_m"
+v+7x40x4_n"extb_s8_wide_n"
+3v+1x23x64_n"extb_s8_long_k"
+
+--reset
+--dt=s32:s8:s32 --breg=s32
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--rtmask=-1,0,1,2,4,8,6,10
+3v+1x5x9_n"extb_s8_runtime_flags"
+
+--reset
+--dt=s32:s8:s32 --breg=s32
+--post=alpha+beta+bias+postop
+--scalar=runtime --rt=runtime
+--max_int_regs=12,14,16,24
+--shape=literal,runtime
+3v+1x7x9_n"extb_s8_register_pressure"

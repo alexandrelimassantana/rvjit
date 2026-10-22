@@ -1,0 +1,75 @@
+# M/N shape sources (literal, blocked, less_eq, runtime) and K shape sources
+# (literal, runtime, blocked), including untransposed/transposed operands.
+#
+# literal/blocked/runtime run the whole matmul in one kernel call; less_eq has
+# the driver chunk M and N by --m_max/--n_max (K is always reduced in full).
+# Sizes accept `v` (one vector register group, in elements) expressions so the
+# shapes hit tile boundaries and tails at every VLEN. Blocked values are elements handed to the backend as-is.
+--reset
+--shape=literal,blocked,runtime --m_blk=2v --n_blk=3
+--transA=0,1 --transB=0,1
+v+5x7x13_n"mn_sources"
+3v+1x9x11_n"mn_sources_multi_tile"
+
+# less_eq: the driver chunks M by --m_max and N by --n_max, so the last chunk
+# of each is a short one, down to less than one vector tile of M
+--reset
+--shape=less_eq --m_max=2v --n_max=3
+--transA=0,1 --transB=0,1
+3vx9x11_n"less_eq_chunks"
+v+5x7x13_n"less_eq_m_tail_single_chunk"
+3v+1x9x11_n"less_eq_m_tail_last_chunk"
+v-1x3x4_n"less_eq_m_below_one_tile"
+
+--reset
+--kshape=literal,runtime,blocked --k_blk=1,4,8
+--transA=0,1 --transB=0,1
+v+5x7x13_n"k_sources"
+
+# A less_eq bound at or above the dimension is a single chunk, one below it
+# leaves a short tail chunk
+--reset
+--shape=less_eq --m_max=v,3v --n_max=3,7
+3vx7x13_n"less_eq_single_chunk"
+
+--reset
+--shape=less_eq --m_max=v --n_max=2 --kshape=runtime
+2vx7x13_n"less_eq_runtime_k"
+
+# Sizes the backend reads from the argument structure instead of a register
+--reset
+--size_at=mem
+--shape=blocked,less_eq,runtime --m_blk=2v --n_blk=3 --m_max=2v --n_max=3
+--kshape=runtime,blocked --k_blk=4
+--transA=0,1 --transB=0,1
+3v+1x9x11_n"mem_sizes"
+v-1x3x4_n"mem_sizes_below_one_tile"
+
+# A host's call pattern: M chunked by one tile, K split over calls (beta 0,
+# then accumulating), every size and scalar read from the argument structure
+--reset
+--size_at=mem --shape=less_eq --m_max=v,2v --n_max=64 --kshape=runtime
+--post=beta+bias --scalar=runtime --rt=runtime --kblock=8
+--dt=f32,f16:f32,bf16:f32
+3v+5x37x29_n"mem_sizes_chunked_k_blocks"
+
+# A K bounded per call: the loop unrolls up to the bound, whatever the bound
+--reset
+--shape=literal,less_eq,runtime --m_max=2v --n_max=3
+--kshape=less_eq --k_max=3,8,13
+--size_at=reg,mem
+3v+1x5x3_n"k_less_eq_small"
+
+--reset
+--shape=literal,less_eq,runtime --m_max=2v --n_max=3
+--kshape=less_eq --k_max=13,16
+--size_at=reg,mem
+3v+1x5x13_n"k_less_eq_above_unroll"
+
+# A host splitting K over calls, each carrying at most the bound
+--reset
+--size_at=reg,mem --shape=less_eq --m_max=v,2v --n_max=64
+--kshape=less_eq --k_max=8,16 --kblock=8
+--post=beta+bias --scalar=runtime --rt=runtime
+--dt=f32,f16:f32,bf16:f32
+3v+5x37x29_n"k_less_eq_blocks"
