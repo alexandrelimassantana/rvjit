@@ -180,10 +180,6 @@ struct impl_t : public rvjit::linalg::matmul::impl_t {
         pm_.set_vtype_keep_vl_if_mixed(rvjit::rvv::vtype_t::cfg_t::output);
     }
 
-    bool on_configure(rvjit::type_t t) override {
-        return pm_.set_vtype_keep_vl(rvjit::rvv::sew_for(t));
-    }
-
 private:
     rvjit::rvv::programming_model_t &pm_;
 

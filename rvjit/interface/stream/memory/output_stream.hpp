@@ -17,10 +17,13 @@
 #ifndef RVJIT_INTERFACE_STREAM_MEMORY_OUTPUT_STREAM_HPP
 #define RVJIT_INTERFACE_STREAM_MEMORY_OUTPUT_STREAM_HPP
 
+#include <memory>
+#include <utility>
+
 #include "rvjit/implementation/common/stream/interleave.hpp"
 #include "rvjit/interface/core/index.hpp"
-#include "rvjit/interface/isa/conversion.hpp"
 #include "rvjit/interface/isa/operation/conversion.hpp"
+#include "rvjit/interface/isa/parameter.hpp"
 #include "rvjit/interface/stream/memory/conversion_stream.hpp"
 #include "rvjit/interface/stream/memory/memory_operand.hpp"
 #include "rvjit/interface/stream/scheduler.hpp"
@@ -37,16 +40,18 @@ namespace memory_operand {
 /// @details It drives a store memory operand whose ring holds the
 ///     accumulators, which convert in place (see `conversion_stream_t`). Every
 ///     step but the last runs over all the positions first, each step in its
-///     own configuration; the last is interleaved with the stores, `delay`
+///     own state; the last is interleaved with the stores, `delay`
 ///     positions ahead, so that an independent conversion separates a store
 ///     from the instruction producing its data
 ///
 /// @note Each position owns its register and converts in place, so staggering
 ///     them needs no extra register
 ///
-/// @pre Without a `configure` switch, the code runs in a configuration where
-///     the single step of the conversion is valid (e.g. the vtype of the
-///     narrow type), and the caller owns the store stream
+/// @note The stores run in the state of the last step; the code around the
+///     stream runs in the state of the accumulators' type, which the typecast
+///     is hinted with
+///
+/// @pre The caller owns the store stream
 struct output_stream_t : public stream_impl_t {
     static constexpr const char *NAME = "rvjit::stream::memory_operand::output";
 
@@ -60,32 +65,29 @@ struct output_stream_t : public stream_impl_t {
 
     /// Configures the stream over a store operand
     ///
-    /// @param cvt The conversion dialect emitting the conversion
+    /// @param tc An empty typecast, which the stream configures and owns
     /// @param sched The scheduler resolving the delay
     /// @param store The store operand, which the stream drives
     /// @param t The stored type (the operand's) and the type of the
     ///     accumulators held by the store's ring
     /// @param pol The policy of the delay between a conversion and its store
-    /// @param configure The configuration switch, which the stream restores to
-    ///     the accumulators' width after the stores
     ///
-    /// @note Returns false for a type pair no chain of steps of `cvt`
-    ///     converts
-    bool init(const operation::conversion_t &cvt, const scheduler_t &sched,
-            memory_operand_impl_t *store, const type_parameter_t &t,
-            const policy_t &pol = policy_t::arithmetic(),
-            const conversion::configure_t &configure
-            = conversion::configure_t()) {
+    /// @note Returns false for a type pair the typecast does not convert
+    bool init(std::unique_ptr<typecast::typecast_t> tc,
+            const scheduler_t &sched, memory_operand_impl_t *store,
+            const type_parameter_t &t,
+            const policy_t &pol = policy_t::arithmetic()) {
         CHECK(store && store->is_valid(), "invalid store operand");
         CHECK(store->op().dir == memory::dir_t::store, "not a store operand");
         const memory::op_t &op = store->op();
         CHECK(op.data.type == t.mem, "a store of another type");
         CHECK(!t.narrows(), "a store wider than the accumulators");
-        conversion_t conv;
-        CHECK(conv.plan_store(t, op.data.form, cvt),
+        CHECK(tc, "no typecast");
+        const operand_t reg(op.data.form, t.reg);
+        const conversion::op_t cast(operand_t(op.data.form, t.mem), reg);
+        CHECK(tc->configure(cast, reg),
                 "unsupported conversion of the accumulators");
-        CHECK(conv_.init(cvt, conv, store, t.reg, 0, configure),
-                "invalid conversion");
+        CHECK(conv_.init(std::move(tc), store), "invalid conversion");
         sched_ = sched;
         pol_ = pol;
         store_ = store;
@@ -124,7 +126,7 @@ struct output_stream_t : public stream_impl_t {
             store_->emit();
             return;
         }
-        const int last = conv_.conversion().size() - 1;
+        const int last = conv_.typecast().nsteps() - 1;
         conv_.emit_steps(0, last);
         conv_.configure(last);
         conv_.select(last);

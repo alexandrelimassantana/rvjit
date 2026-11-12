@@ -17,10 +17,12 @@
 #ifndef RVJIT_INTERFACE_STREAM_MEMORY_CONVERSION_STREAM_HPP
 #define RVJIT_INTERFACE_STREAM_MEMORY_CONVERSION_STREAM_HPP
 
+#include <memory>
+#include <utility>
+
 #include "rvjit/interface/core/index.hpp"
-#include "rvjit/interface/isa/conversion.hpp"
-#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/stream/stream_impl.hpp"
+#include "rvjit/interface/typecast/typecast.hpp"
 
 #include "rvjit/utils/debug_def.hpp"
 
@@ -31,17 +33,17 @@ namespace memory_operand {
 /// A stream converting the values another stream's registers hold
 ///
 /// @details Each position converts the register of the same position of the
-///     `regs` stream. A narrowing (or same-width) conversion runs in place;
-///     a widening one reads the narrow value `offset` registers above the
-///     wide register it fills, the highest part of its group, and continues
-///     in place. A position emits the selected step, or every step
+///     `regs` stream through a typecast. A narrowing (or same-width) typecast
+///     runs in place; a widening one reads the narrow value `offset`
+///     registers above the wide register it fills, the highest part of its
+///     group, and continues in place. A position emits the selected step, or
+///     every step
 ///
-/// @note The configuration is switched through `configure` only when a step
-///     runs at another width than the current one, starting from the width
-///     the stream is created in, which `restore()` returns to
-///
-/// @pre Without `configure`, the caller runs every step in a valid
-///     configuration
+/// @note The stream tracks the typecast position whose state is in effect,
+///     starting from the state hint's, and walks forward from it through the
+///     cycle hint, step 0, ..., hint: `configure(s)` interposes when a
+///     position on the way to step `s` does, and `restore()` returns to the
+///     hint's state the same way
 struct conversion_stream_t : public stream_impl_t {
     static constexpr const char *NAME
             = "rvjit::stream::memory_operand::conversion";
@@ -50,54 +52,48 @@ struct conversion_stream_t : public stream_impl_t {
 
     /// Configures the stream over the registers of `regs`
     ///
-    /// @param cvt The conversion dialect emitting the steps
-    /// @param conv The conversion
+    /// @param tc The typecast, configured and valid, which the stream owns
     /// @param regs The stream whose registers hold the values
-    /// @param home The type whose width is in effect around the stream
     /// @param offset The registers between a wide register and the narrow
-    ///     part a widening reads, 0 unless the conversion widens
-    /// @param configure The configuration switch, empty when the caller keeps
-    ///     a valid configuration
-    bool init(const operation::conversion_t &cvt, const conversion_t &conv,
-            stream_impl_t *regs, type_t home, int offset = 0,
-            const conversion::configure_t &configure
-            = conversion::configure_t()) {
+    ///     part a widening reads, 0 unless the typecast widens
+    bool init(std::unique_ptr<typecast::typecast_t> tc, stream_impl_t *regs,
+            int offset = 0) {
         CHECK(regs, "no register stream");
-        const bool widens
-                = !conv.empty() && sewb(conv.to()) > sewb(conv.from());
+        CHECK(tc && tc->is_valid(), "an invalid typecast");
+        const bool widens = !tc->empty() && tc->dst().width > tc->src().width;
         CHECK(!widens || offset > 0,
                 "a widening needs the upper part of a group");
-        cvt_ = &cvt;
-        conv_ = conv;
+        tc_ = std::move(tc);
         regs_ = regs;
         offset_ = widens ? offset : 0;
-        home_ = cur_ = home;
-        configure_ = configure;
+        at_ = tc_->nsteps();
         step_ = -1;
         return true;
     }
 
-    /// The conversion
-    const conversion_t &conversion() const { return conv_; }
+    /// The typecast
+    ///
+    /// @pre The stream is initialized
+    const typecast::typecast_t &typecast() const { return *tc_; }
 
     /// Whether there is anything to convert
-    bool converts() const { return !conv_.empty(); }
+    bool converts() const { return tc_ && !tc_->empty(); }
 
     /// Makes `iteration()` emit step `s` only, or every step for -1
     ///
     /// @param s The step
     void select(int s) { step_ = s; }
 
-    /// Switches to the configuration of step `s`, if it differs
+    /// Enters the state of step `s`, interposing when it differs
     ///
     /// @param s The step
-    bool configure(int s) { return reconfigure_(conv_.step(s).config()); }
+    bool configure(int s) { return enter_(s); }
 
-    /// Switches back to the width the stream was created in, if it differs
-    bool restore() { return reconfigure_(home_); }
+    /// Returns to the state hint's state, interposing when it differs
+    bool restore() { return converts() ? enter_(tc_->nsteps()) : true; }
 
     /// Emits steps `first` up to `last` (excluded) of every position, step by
-    /// step, each in its own configuration
+    /// step, each in its own state
     ///
     /// @param first The first step
     /// @param last The step after the last one
@@ -111,7 +107,7 @@ struct conversion_stream_t : public stream_impl_t {
     }
 
     /// Emits steps `first` up to `last` (excluded) of `n` positions, step by
-    /// step, each in its own configuration
+    /// step, each in its own state
     ///
     /// @param first The first step
     /// @param last The step after the last one
@@ -143,33 +139,35 @@ struct conversion_stream_t : public stream_impl_t {
 protected:
     void produce_(const index_t &idx) override {
         const int first = step_ < 0 ? 0 : step_;
-        const int last = step_ < 0 ? conv_.size() : step_ + 1;
+        const int last = step_ < 0 ? tc_->nsteps() : step_ + 1;
         const name_t wide = get(idx);
         for (int s = first; s < last; ++s) {
             const name_t src = s == 0 ? regs_->get(idx) : wide;
-            emit_step_(s, wide, src);
+            tc_->emit(s, wide, src);
         }
     }
 
 private:
-    const operation::conversion_t *cvt_ = nullptr;
-    conversion_t conv_;
+    std::unique_ptr<typecast::typecast_t> tc_;
     stream_impl_t *regs_ = nullptr;
     int offset_ = 0;
-    type_t home_ = type_t::none;
-    type_t cur_ = type_t::none;
-    conversion::configure_t configure_;
+    int at_ = 0; // The position in effect, `nsteps()` for the hint's state
     int step_ = -1;
 
-    // Emits step `s` from `src` into `dst`, in its configuration
-    void emit_step_(int s, name_t dst, name_t src) const {
-        conv_.expression(s, *cvt_)(dst, src);
+    // Whether a position interposes on the way from `at_` to `s`, walking
+    // forward through the cycle hint, 0, ..., nsteps() (the hint again)
+    bool changes_(int s) const {
+        const int n = tc_->nsteps() + 1;
+        for (int k = (at_ + 1) % n;; k = (k + 1) % n) {
+            if (tc_->interposes(k)) return true;
+            if (k == s) return false;
+        }
     }
 
-    bool reconfigure_(type_t t) {
-        if (!configure_ || sewb(t) == sewb(cur_)) return true;
-        CHECK(configure_(t), "no configuration of the step's width");
-        cur_ = t;
+    bool enter_(int s) {
+        if (!converts() || s == at_) return true;
+        if (changes_(s)) CHECK(tc_->interpose(s), "no state of the step");
+        at_ = s;
         return true;
     }
 };

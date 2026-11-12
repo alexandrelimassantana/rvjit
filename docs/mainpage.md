@@ -9,6 +9,7 @@ through `rvjit::rvv::base_programming_model_t` and composes them.
 | Constant arithmetic | `rvjit::operation::const_arithmetic_t` | `rvjit::rv64::const_arithmetic` |
 | Arithmetic | `rvjit::operation::arithmetic_t` | `rvjit::rvv::arithmetic` |
 | Conversion | `rvjit::operation::conversion_t` | `rvjit::rvv::conversion`, `rvjit::rv64::conversion` |
+| Typecast | `rvjit::typecast::typecast_t` | `rvjit::rvv::typecast`, `rvjit::rv64::typecast` |
 | Memory | `rvjit::operation::memory_t` | `rvjit::rvv::memory` |
 | Control flow | `rvjit::operation::control_flow_t` | `rvjit::rv64::control_flow` |
 | Transfer | `rvjit::operation::transfer_t` | `rvjit::rv64::transfer` |

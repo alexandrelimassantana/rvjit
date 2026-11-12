@@ -231,7 +231,7 @@ struct type_parameter_t {
     /// @param group The registers of a group of `reg`
     ///
     /// @details A widening reads the narrow value from the highest part of
-    ///     the wide group (see `conversion_t`), where it must be loaded
+    ///     the wide group (see `typecast::typecast_t`), where it must be loaded
     int offset(int group) const { return group - group / ratio(); }
 
     bool operator==(const type_parameter_t &o) const {

@@ -18,9 +18,10 @@
 #define RVJIT_INTERFACE_LINALG_MATMUL_EPILOGUE_HPP
 
 #include <algorithm>
+#include <utility>
 
-#include "rvjit/interface/isa/conversion.hpp"
 #include "rvjit/interface/isa/operation/control_flow.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/isa/register.hpp"
 #include "rvjit/interface/linalg/matmul/impl.hpp"
 #include "rvjit/interface/linalg/matmul/plan.hpp"
@@ -145,23 +146,23 @@ struct epilogue_t {
         // The accumulators reach the epilogue's type in place first, e.g. an
         // s32 accumulation scaled in f32, through the store's view of them
         const type_t acc = plan_.dtc.reg, epi = plan_.epi_type();
-        const auto &cvt = pm_.isa().conversion();
-        conversion_t retype;
         CHECK_OR_RET(sewb(acc) == sewb(epi),
                 shortfall_t::of(resource_t::integers),
                 "an epilogue type of another width");
-        CHECK_OR_RET(retype.plan(acc, epi, env_.c_form, cvt),
+        const operand_t to(env_.c_form, epi);
+        const conversion::op_t cast(to, operand_t(env_.c_form, acc));
+        auto retype = pm_.typecast();
+        CHECK_OR_RET(retype && retype->configure(cast, to),
                 shortfall_t::of(resource_t::integers),
                 "unsupported conversion of the accumulators");
         retype_ = stream::memory_operand::conversion_stream_t();
-        if (!retype.empty() && !retype_.init(cvt, retype, store_, epi))
+        if (!retype->empty() && !retype_.init(std::move(retype), store_))
             return shortfall_t::of(resource_t::integers);
 
         // The accumulators are narrowed to C's type on their way out
-        CHECK_OR_RET(
-                out_.init(pm_.isa().conversion(), pm_.streams().scheduler(),
-                        store_, type_parameter_t(plan_.dtc.mem, epi),
-                        stream::policy_t::arithmetic(), env_.configure),
+        CHECK_OR_RET(out_.init(pm_.typecast(), pm_.streams().scheduler(),
+                             store_, type_parameter_t(plan_.dtc.mem, epi),
+                             stream::policy_t::arithmetic()),
                 shortfall_t::of(resource_t::integers),
                 "unable to narrow the accumulators");
         return {};

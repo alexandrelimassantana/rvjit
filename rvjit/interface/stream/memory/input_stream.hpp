@@ -17,9 +17,12 @@
 #ifndef RVJIT_INTERFACE_STREAM_MEMORY_INPUT_STREAM_HPP
 #define RVJIT_INTERFACE_STREAM_MEMORY_INPUT_STREAM_HPP
 
+#include <memory>
+#include <utility>
 #include "rvjit/interface/core/index.hpp"
-#include "rvjit/interface/isa/conversion.hpp"
+
 #include "rvjit/interface/isa/operation/conversion.hpp"
+#include "rvjit/interface/isa/parameter.hpp"
 #include "rvjit/interface/stream/buffer_map.hpp"
 #include "rvjit/interface/stream/memory/conversion_stream.hpp"
 #include "rvjit/interface/stream/memory/memory_operand.hpp"
@@ -37,9 +40,10 @@ namespace memory_operand {
 /// @note `fetch` and `convert` are separate so that a consumer can issue the
 ///     loads of several positions ahead of their conversions
 ///
-/// @pre Without a `configure` switch, the code runs in a configuration where
-///     the single step of the conversion is valid (e.g. the vtype of the
-///     narrow type), and the caller owns the load stream
+/// @note The code around the stream runs in the state of the computing
+///     type, which the typecast is hinted with
+///
+/// @pre The caller owns the load stream
 struct input_stream_t : public stream_impl_t {
     static constexpr const char *NAME = "rvjit::stream::memory_operand::input";
 
@@ -53,31 +57,28 @@ struct input_stream_t : public stream_impl_t {
 
     /// Configures the stream over a load operand
     ///
-    /// @param cvt The conversion dialect emitting the conversion
+    /// @param tc An empty typecast, which the stream configures and owns
     /// @param load The load operand, which the stream drives
     /// @param t The loaded type (the operand's) and the type the registers
     ///     compute in
     /// @param offset The registers between a wide register and its upper
     ///     part, the load operand's variant `offset`
-    /// @param configure The configuration switch, which the stream restores to
-    ///     the computing type's width after converting
     ///
-    /// @note Returns false for a type pair no chain of steps of `cvt`
-    ///     converts
-    bool init(const operation::conversion_t &cvt, memory_operand_impl_t *load,
-            const type_parameter_t &t, int offset,
-            const conversion::configure_t &configure
-            = conversion::configure_t()) {
+    /// @note Returns false for a type pair the typecast does not convert
+    bool init(std::unique_ptr<typecast::typecast_t> tc,
+            memory_operand_impl_t *load, const type_parameter_t &t,
+            int offset) {
         CHECK(load && load->is_valid(), "invalid load operand");
         CHECK(load->op().dir == memory::dir_t::load, "not a load operand");
         const memory::op_t &op = load->op();
         CHECK(op.data.type == t.mem, "a load of another type");
         CHECK(!t.narrows(), "a loaded type wider than the computing type");
-        conversion_t conv;
-        CHECK(conv.plan_load(t, op.data.form, cvt),
+        CHECK(tc, "no typecast");
+        const operand_t reg(op.data.form, t.reg);
+        const conversion::op_t cast(reg, operand_t(op.data.form, t.mem));
+        CHECK(tc->configure(cast, reg),
                 "unsupported conversion of the loaded type");
-        CHECK(conv_.init(cvt, conv, load, t.reg, offset, configure),
-                "invalid conversion");
+        CHECK(conv_.init(std::move(tc), load, offset), "invalid conversion");
         load_ = load;
         return true;
     }
@@ -110,8 +111,8 @@ struct input_stream_t : public stream_impl_t {
     /// Emits the conversion of position `idx`, nothing when the types match
     void convert(const index_t &idx) { conv_.iteration(idx); }
 
-    /// Emits the loads of `n` positions, then their conversions step by step,
-    /// each step in its own configuration
+    /// Emits the loads of `n` positions, in the state of the first step, then
+    /// their conversions step by step, each step in its own state
     ///
     /// @param at The callable giving the `j`-th position, `index_t(int)`
     /// @param n The number of positions
@@ -120,13 +121,13 @@ struct input_stream_t : public stream_impl_t {
         if (conv_.converts()) conv_.configure(0);
         for (int j = 0; j < n; ++j)
             fetch(at(j));
-        conv_.emit_steps(0, conv_.conversion().size(), at, n);
+        conv_.emit_steps(0, conv_.typecast().nsteps(), at, n);
         conv_.restore();
     }
 
 protected:
     /// Emits the load of position `idx`, then its conversion step by step,
-    /// each step in its own configuration
+    /// each step in its own state
     void produce_(const index_t &idx) override {
         fetch_convert([&idx](int) { return idx; }, 1);
     }

@@ -24,9 +24,9 @@
 #include "rvjit/interface/induction/step.hpp"
 #include "rvjit/interface/isa/buffer/stack.hpp"
 #include "rvjit/interface/isa/const.hpp"
-#include "rvjit/interface/isa/conversion.hpp"
 #include "rvjit/interface/isa/operand.hpp"
 #include "rvjit/interface/isa/operation/arithmetic.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/isa/operation/memory.hpp"
 #include "rvjit/interface/isa/operation/transfer.hpp"
 #include "rvjit/interface/isa/pointer.hpp"
@@ -85,7 +85,6 @@ struct matmul_t {
     explicit matmul_t(impl_t &impl)
         : impl_(impl)
         , pm_(impl.model())
-        , configure_([&impl](type_t t) { return impl.on_configure(t); })
         , epilogue_(pm_, pm_.streams().memory_operand(), plan_) {}
 
     /// Resolves `p` and returns whether or not the component succeeded
@@ -135,9 +134,10 @@ struct matmul_t {
 
         // The accumulators reach C's type as they are stored, through the
         // epilogue's type
-        conversion_t out;
-        CHECK(out.plan(p.epi_type(), p.dtc.mem, impl_.c_form,
-                      pm_.isa().conversion()),
+        const operand_t epi(impl_.c_form, p.epi_type());
+        const operand_t c(impl_.c_form, p.dtc.mem);
+        const auto out = pm_.typecast();
+        CHECK(out && out->configure(conversion::op_t(c, epi), epi),
                 "unsupported conversion of the accumulators");
 
         // Create the dense loop nest, whose resources are drawn later, in the
@@ -376,9 +376,8 @@ struct matmul_t {
                         a_stream_ = ms.create(a_plan);
                         if (!a_stream_->is_valid()) return ms.miss();
                         if (plan_.dta.converts()
-                                && !a_in_.init(pm_.isa().conversion(),
-                                        a_stream_, plan_.dta, a_offset_,
-                                        configure_))
+                                && !a_in_.init(pm_.typecast(), a_stream_,
+                                        plan_.dta, a_offset_))
                             return shortfall_t::of(resource_t::vectors);
                         return shortfall_t {};
                     });
@@ -395,7 +394,6 @@ struct matmul_t {
                         env.m_grain = impl_.m_grain;
                         env.sewb_c = rvjit::sewb(plan_.dtc.mem);
                         env.c_form = impl_.c_form;
-                        env.configure = configure_;
                         env.tune_c = [this](memory_spec_t &spec,
                                              memory_variant_t &variant) {
                             impl_.set_c_operand(spec, variant);
@@ -569,7 +567,6 @@ private:
 
     impl_t &impl_;
     programming_model_t &pm_;
-    conversion::configure_t configure_; // The implementation's switch
 
     plan_t plan_; // The plan being generated
     epilogue_t epilogue_; // Post-ops and the C store, after each K loop

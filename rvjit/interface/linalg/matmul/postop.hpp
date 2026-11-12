@@ -23,7 +23,6 @@
 #include "rvjit/interface/core/index.hpp"
 #include "rvjit/interface/isa/buffer/buffer.hpp"
 #include "rvjit/interface/isa/const.hpp"
-#include "rvjit/interface/isa/conversion.hpp"
 #include "rvjit/interface/isa/operand.hpp"
 #include "rvjit/interface/isa/pointer.hpp"
 #include "rvjit/interface/isa/register.hpp"
@@ -108,9 +107,6 @@ struct postop_env_t : public postop_shape_t {
     std::function<void(stream::memory_operand::spec_t &,
             stream::memory_operand::variant_t &)>
             tune_c;
-
-    // Switches the configuration to a type's width, keeping the vector length
-    conversion::configure_t configure;
 
     variable_t ptrc;
     const_t c_m_stride; // Bytes between C's M granules

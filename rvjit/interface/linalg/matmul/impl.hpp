@@ -243,21 +243,6 @@ struct impl_t {
         (void)remaining;
     }
 
-    /// Switches the vector configuration to `t`'s element width, keeping the
-    /// vector length
-    ///
-    /// @param t The type whose width the conversions or memory operations that
-    ///     follow run at
-    ///
-    /// @note Called by the conversion streams around the steps of a conversion
-    ///     at another width, and with the accumulators' type to come back;
-    ///     returns false when no configuration fits the width
-    virtual bool on_configure(type_t t) {
-        (void)t;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
 private:
     programming_model_t &model_;
 };

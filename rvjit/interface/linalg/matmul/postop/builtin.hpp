@@ -275,8 +275,7 @@ struct accumulate_t : public postop_t {
                                      stream::iterator::update_t::preserve()),
                 variant);
         if (!load_->is_valid()) return env.ms.miss();
-        if (!in_.init(
-                    env.pm.isa().conversion(), load_, c, offset, env.configure))
+        if (!in_.init(env.pm.typecast(), load_, c, offset))
             return shortfall_t::of(resource_t::integers);
         return {};
     }
@@ -425,8 +424,7 @@ struct bias_add_t : public postop_t {
         const int offset = variant.offset;
         bias_ = env.create_c(spec, variant);
         if (!bias_->is_valid()) return env.ms.miss();
-        if (!in_.init(
-                    env.pm.isa().conversion(), bias_, b, offset, env.configure))
+        if (!in_.init(env.pm.typecast(), bias_, b, offset))
             return shortfall_t::of(resource_t::integers);
         return {};
     }

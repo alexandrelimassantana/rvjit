@@ -158,8 +158,8 @@ vload(reg_name(v8), pointer_t(a0, 0)); // vle32.v v8, (a0)
 
 Multiply-accumulate, add, mul, zero and bitcast, each an expression created
 from its operands' forms and types and called with their registers; one
-expression emits any number of times.
-`is_valid` tells whether the target can emit it. Interface:
+expression emits any number of times. `is_valid` tells whether the target can
+emit it. Interface:
 [`arithmetic.hpp`](rvjit/interface/isa/operation/arithmetic.hpp).
 
 ```cpp
@@ -182,6 +182,26 @@ RVV converts vectors and casts scalars through RV64. Interface:
 ```cpp
 const auto f2i = pm.isa().conversion().cast(form_t::vector, type_t::s32, type_t::f32);
 if (f2i.is_valid()) f2i(reg_name(v8), reg_name(v8)); // vfcvt.x.f.v v8, v8
+```
+
+### Typecasts
+
+The chain of conversions between any two types, planned against the
+conversion dialect, with the instructions the target interposes between the
+steps: on RVV, the `vsetvli` of each change of element width, keeping the
+vector length of the output configuration. A state hint names the state the
+code around the typecast runs in, which the last interposition returns to.
+`emit(dst, src)` converts one value through every step and interposition;
+`emit(i, dst, src)` and `interpose(i)` let a caller interleave many values.
+Interface: [`typecast.hpp`](rvjit/interface/typecast/typecast.hpp).
+
+```cpp
+pm.vtype.for_uniform(SEW::e32, LMUL::m4);
+const operand_t acc(form_t::vector, type_t::f32);
+const operand_t out(form_t::vector, type_t::s8);
+auto tc = pm.typecast();
+if (tc->configure(conversion::op_t(out, acc), acc))
+    tc->emit(reg_name(v8), reg_name(v8)); // vfcvt, e16, vnclip, e8, vnclip, e32
 ```
 
 ### Loops

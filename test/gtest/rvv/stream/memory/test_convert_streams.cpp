@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,11 +23,10 @@
 
 #include "env.hpp"
 #include "rv64_jit_test_generator.hpp"
-#include "rvjit/implementation/rvv/isa/operation/arithmetic/arithmetic.hpp"
 #include "rvjit/interface/isa/const.hpp"
-#include "rvjit/interface/isa/conversion.hpp"
 #include "rvjit/interface/stream/memory/input_stream.hpp"
 #include "rvjit/interface/stream/memory/output_stream.hpp"
+#include "rvjit/interface/typecast/typecast.hpp"
 #include "rvv/stream/memory/memory_operand_helpers.hpp"
 
 namespace rvjit {
@@ -52,6 +52,7 @@ rv64_jit_probe_t::generate_fn_t narrow_store_probe(int rows, int delay) {
     return [rows, delay](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen, excluding_ints({a0, a1, a2}));
         env.pool.set_vector_group_size(2);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m2);
         gen.li(a2, kAvl);
         gen.vsetvli(x0, a2, SEW::e32, LMUL::m2, VTA::ta, VMA::ma);
 
@@ -80,13 +81,12 @@ rv64_jit_probe_t::generate_fn_t narrow_store_probe(int rows, int delay) {
 
         output_stream_t out;
         {
-            const bool ok = out.init(env.pm.isa().conversion(),
-                    env.pm.streams().scheduler(), store,
-                    type_parameter_t(type_t::f16, type_t::f32),
-                    policy_t::literal(delay));
+            const bool ok
+                    = out.init(env.pm.typecast(), env.pm.streams().scheduler(),
+                            store, type_parameter_t(type_t::f16, type_t::f32),
+                            policy_t::literal(delay));
             ASSERT_TRUE(ok);
         }
-        gen.vsetvli(x0, x0, SEW::e16, LMUL::m1, VTA::ta, VMA::ma);
         out.emit();
         gen.ret();
     };
@@ -121,6 +121,7 @@ std::string narrow_store_order(int rows, int delay, type_t acc) {
     rv64_jit_probe_t kernel([=](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen, excluding_ints({a0, a1, a2}));
         env.pool.set_vector_group_size(2);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m2);
         const buffer::buffer_t regs = env.pool.vectors().pop(rows);
         const buffer_map_t ring(regs, {rows, 1});
         space_t out_space;
@@ -133,10 +134,10 @@ std::string narrow_store_order(int rows, int delay, type_t acc) {
                         make_variant(rv64::stream::iterator::guided, 0, ring));
         output_stream_t out;
         {
-            const bool ok = out.init(env.pm.isa().conversion(),
-                    env.pm.streams().scheduler(), store,
-                    type_parameter_t(type_t::f16, acc),
-                    policy_t::literal(delay));
+            const bool ok
+                    = out.init(env.pm.typecast(), env.pm.streams().scheduler(),
+                            store, type_parameter_t(type_t::f16, acc),
+                            policy_t::literal(delay));
             ASSERT_TRUE(ok);
         }
         out.emit();
@@ -183,46 +184,85 @@ TEST(output_stream_init, rejects_other_ratios) {
     ASSERT_TRUE(store->is_valid());
     output_stream_t out;
     {
-        const bool ok = out.init(env.pm.isa().conversion(),
+        const bool ok = out.init(env.pm.typecast(),
                 env.pm.streams().scheduler(), store,
                 type_parameter_t(type_t::f16, type_t::f64), policy_t::zero());
         EXPECT_FALSE(ok);
     }
     {
-        const bool ok = out.init(env.pm.isa().conversion(),
+        const bool ok = out.init(env.pm.typecast(),
                 env.pm.streams().scheduler(), store,
                 type_parameter_t(type_t::f16, type_t::s32), policy_t::zero());
         EXPECT_FALSE(ok);
     }
 }
 
-/// A configuration switch that fails is reported and retried, never assumed
-TEST(conversion_stream, a_failed_switch_keeps_the_width) {
-    host_model_env_t env;
-    env.pool.set_vector_group_size(2);
-    const buffer::buffer_t regs = env.pool.vectors().pop(1);
-    space_t space;
-    space.axis(1, const_t(kAvl * 2));
-    memory::op_t load_op = memory::op_t().vector().load().as_type(type_t::f16);
-    auto *load = env.memops.create(make_spec(load_op, pointer_t(a0, 0), space,
-                                           addressing_t::base_only),
-            make_variant(rv64::stream::iterator::guided, 0,
-                    buffer_map_t(regs, {1, 1})));
-    ASSERT_TRUE(load->is_valid());
-    conversion_t conv;
-    ASSERT_TRUE(conv.plan(type_t::f16, type_t::f32, form_t::vector,
-            env.pm.isa().conversion()));
+/// A typecast whose every position interposes, counting its interpositions
+struct counting_typecast_t : public typecast::typecast_t {
+    counting_typecast_t(const operation::conversion_t &cvt, int &calls, bool ok)
+        : typecast::typecast_t(cvt), calls_(&calls), ok_(ok) {}
 
-    int calls = 0;
-    const auto refuse = [&calls](type_t) { return ++calls < 0; };
+    bool interposes(int i) const override {
+        (void)i;
+        return true;
+    }
+
+    bool interpose(int i) const override {
+        (void)i;
+        ++*calls_;
+        return ok_;
+    }
+
+private:
+    int *calls_;
+    bool ok_;
+};
+
+/// A conversion stream over a counting typecast of an f16 load
+struct counted_stream_t {
+    host_model_env_t env;
     stream::memory_operand::conversion_stream_t s;
-    ASSERT_TRUE(s.init(
-            env.pm.isa().conversion(), conv, load, type_t::f32, 1, refuse));
-    EXPECT_FALSE(s.configure(0));
-    EXPECT_FALSE(s.configure(0));
-    EXPECT_EQ(calls, 2);
-    EXPECT_TRUE(s.restore());
-    EXPECT_EQ(calls, 2);
+    int calls = 0;
+
+    explicit counted_stream_t(bool ok) {
+        env.pool.set_vector_group_size(2);
+        const buffer::buffer_t regs = env.pool.vectors().pop(1);
+        space_t space;
+        space.axis(1, const_t(kAvl * 2));
+        memory::op_t load_op
+                = memory::op_t().vector().load().as_type(type_t::f16);
+        auto *load = env.memops.create(make_spec(load_op, pointer_t(a0, 0),
+                                               space, addressing_t::base_only),
+                make_variant(rv64::stream::iterator::guided, 0,
+                        buffer_map_t(regs, {1, 1})));
+        std::unique_ptr<typecast::typecast_t> tc(
+                new counting_typecast_t(env.pm.isa().conversion(), calls, ok));
+        const conversion::op_t widen(type_t::f32, type_t::f16, form_t::vector);
+        EXPECT_TRUE(load->is_valid());
+        EXPECT_TRUE(tc->configure(widen));
+        EXPECT_TRUE(s.init(std::move(tc), load, 1));
+    }
+};
+
+/// A stream interposes once per change of state, and restores once
+TEST(conversion_stream, interposes_once_per_change) {
+    counted_stream_t c(true);
+    EXPECT_TRUE(c.s.configure(0));
+    EXPECT_TRUE(c.s.configure(0));
+    EXPECT_EQ(c.calls, 1);
+    EXPECT_TRUE(c.s.restore());
+    EXPECT_TRUE(c.s.restore());
+    EXPECT_EQ(c.calls, 2);
+}
+
+/// An interposition that fails is reported and retried, never assumed
+TEST(conversion_stream, a_failed_interposition_keeps_the_state) {
+    counted_stream_t c(false);
+    EXPECT_FALSE(c.s.configure(0));
+    EXPECT_FALSE(c.s.configure(0));
+    EXPECT_EQ(c.calls, 2);
+    EXPECT_TRUE(c.s.restore());
+    EXPECT_EQ(c.calls, 2);
 }
 
 /// A probe loading f16 rows into the upper half of wide registers, widening
@@ -231,8 +271,9 @@ rv64_jit_probe_t::generate_fn_t widen_load_probe(int rows) {
     return [rows](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen, excluding_ints({a0, a1, a2}));
         env.pool.set_vector_group_size(2);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m2);
         gen.li(a2, kAvl);
-        gen.vsetvli(x0, a2, SEW::e16, LMUL::m1, VTA::ta, VMA::ma);
+        gen.vsetvli(x0, a2, SEW::e32, LMUL::m2, VTA::ta, VMA::ma);
 
         const buffer::buffer_t regs = env.pool.vectors().pop(rows);
         const buffer_map_t wide(regs, {rows, 1});
@@ -262,13 +303,12 @@ rv64_jit_probe_t::generate_fn_t widen_load_probe(int rows) {
 
         input_stream_t reload;
         {
-            const bool ok = reload.init(env.pm.isa().conversion(), load,
+            const bool ok = reload.init(env.pm.typecast(), load,
                     type_parameter_t(type_t::f16, type_t::f32), offset);
             ASSERT_TRUE(ok);
         }
         ASSERT_TRUE(reload.converts());
         reload.emit();
-        gen.vsetvli(x0, x0, SEW::e32, LMUL::m2, VTA::ta, VMA::ma);
         store->emit();
         gen.ret();
     };
@@ -289,15 +329,6 @@ TEST(input_stream, widens_from_the_upper_half) {
         ASSERT_EQ(out[i], kValues[i % 8]) << "at i=" << i;
 }
 
-/// Switches to `t`'s width from e32/m4, keeping the vector length
-bool configure_from_e32_m4(rv64_jit_test_generator_t &gen, type_t t) {
-    const int w = sewb(t);
-    const SEW sew = w == 1 ? SEW::e8 : w == 2 ? SEW::e16 : SEW::e32;
-    const LMUL lmul = w == 1 ? LMUL::m1 : w == 2 ? LMUL::m2 : LMUL::m4;
-    gen.vsetvli(x0, x0, sew, lmul, VTA::ta, VMA::ma);
-    return true;
-}
-
 // f32 values around the rounding and saturation margins of s8 and u8
 constexpr float kWide[8]
         = {1.4f, 2.5f, -3.5f, 127.6f, -200.f, 300.f, 0.5f, -0.5f};
@@ -310,6 +341,7 @@ rv64_jit_probe_t::generate_fn_t chain_store_probe(int rows, type_t out) {
     return [rows, out](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen, excluding_ints({a0, a1, a2}));
         env.pool.set_vector_group_size(4);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m4);
         gen.li(a2, kAvl);
         gen.vsetvli(x0, a2, SEW::e32, LMUL::m4, VTA::ta, VMA::ma);
 
@@ -334,13 +366,10 @@ rv64_jit_probe_t::generate_fn_t chain_store_probe(int rows, type_t out) {
         load->emit();
 
         output_stream_t stream;
-        const auto configure
-                = [&gen](type_t t) { return configure_from_e32_m4(gen, t); };
         {
-            const bool ok = stream.init(env.pm.isa().conversion(),
+            const bool ok = stream.init(env.pm.typecast(),
                     env.pm.streams().scheduler(), store,
-                    type_parameter_t(out, type_t::f32), policy_t::literal(1),
-                    configure);
+                    type_parameter_t(out, type_t::f32), policy_t::literal(1));
             ASSERT_TRUE(ok);
         }
         stream.emit();
@@ -386,6 +415,7 @@ rv64_jit_probe_t::generate_fn_t chain_load_probe(int rows, type_t in) {
     return [rows, in](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen, excluding_ints({a0, a1, a2}));
         env.pool.set_vector_group_size(4);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m4);
         gen.li(a2, kAvl);
         gen.vsetvli(x0, a2, SEW::e32, LMUL::m4, VTA::ta, VMA::ma);
 
@@ -413,11 +443,9 @@ rv64_jit_probe_t::generate_fn_t chain_load_probe(int rows, type_t in) {
         ASSERT_TRUE(store->is_valid());
 
         input_stream_t reload;
-        const auto configure
-                = [&gen](type_t t) { return configure_from_e32_m4(gen, t); };
         {
-            const bool ok = reload.init(env.pm.isa().conversion(), load,
-                    type_parameter_t(in, type_t::f32), offset, configure);
+            const bool ok = reload.init(env.pm.typecast(), load,
+                    type_parameter_t(in, type_t::f32), offset);
             ASSERT_TRUE(ok);
         }
         reload.fetch_convert([](int j) { return index_t {j, 0}; }, rows);
@@ -462,6 +490,7 @@ int widen_switches(int rows, bool batched) {
     rv64_jit_probe_t kernel([=](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen, excluding_ints({a0, a1, a2}));
         env.pool.set_vector_group_size(4);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m4);
         const buffer::buffer_t regs = env.pool.vectors().pop(rows);
         memory_variant_t upper = make_variant(rv64::stream::iterator::guided, 0,
                 buffer_map_t(regs, {rows, 1}));
@@ -474,11 +503,9 @@ int widen_switches(int rows, bool batched) {
                                                space, addressing_t::base_only),
                 upper);
         input_stream_t in;
-        const auto configure
-                = [&gen](type_t t) { return configure_from_e32_m4(gen, t); };
         {
-            const bool ok = in.init(env.pm.isa().conversion(), load,
-                    type_parameter_t(type_t::f16, type_t::f32), 2, configure);
+            const bool ok = in.init(env.pm.typecast(), load,
+                    type_parameter_t(type_t::f16, type_t::f32), 2);
             ASSERT_TRUE(ok);
         }
         if (batched)
@@ -495,6 +522,48 @@ int widen_switches(int rows, bool batched) {
     for (size_t i = 0; i < kernel.getSize() / sizeof(uint32_t); ++i)
         if ((code[i] & 0x8000707fu) == 0x00007057u) ++n; // vsetvli
     return n;
+}
+
+/// The `vsetvli`s an output stream storing f32 accumulators as `out` emits
+int store_switches(type_t out) {
+    rv64_jit_probe_t kernel([=](rv64_jit_test_generator_t &gen) {
+        static constexpr int rows = 2;
+        model_env_t env(gen, excluding_ints({a0, a1, a2}));
+        env.pool.set_vector_group_size(4);
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m4);
+        const buffer::buffer_t regs = env.pool.vectors().pop(rows);
+        space_t space;
+        space.axis(rows, const_t(kAvl));
+        memory::op_t store_op = memory::op_t().vector().store().as_type(out);
+        auto *store = env.memops.create(make_spec(store_op, pointer_t(a1, 0),
+                                                space, addressing_t::base_only),
+                make_variant(rv64::stream::iterator::guided, 0,
+                        buffer_map_t(regs, {rows, 1})));
+        output_stream_t stream;
+        {
+            const bool ok = stream.init(env.pm.typecast(),
+                    env.pm.streams().scheduler(), store,
+                    type_parameter_t(out, type_t::f32), policy_t::literal(1));
+            ASSERT_TRUE(ok);
+        }
+        stream.emit();
+        gen.ret();
+    });
+    EXPECT_TRUE(kernel.create_kernel());
+
+    int n = 0;
+    const auto *code = kernel.getCode<const uint32_t *>();
+    for (size_t i = 0; i < kernel.getSize() / sizeof(uint32_t); ++i)
+        if ((code[i] & 0x8000707fu) == 0x00007057u) ++n; // vsetvli
+    return n;
+}
+
+/// A store switches width only where a step changes it, and back once: a
+/// cast at the accumulators' width needs no switch
+TEST(output_stream_cost, switches_only_where_the_width_changes) {
+    EXPECT_EQ(store_switches(type_t::s8), 3);
+    EXPECT_EQ(store_switches(type_t::f16), 2);
+    EXPECT_EQ(store_switches(type_t::s32), 0);
 }
 
 /// A widening switches to the narrow width and back around every position
