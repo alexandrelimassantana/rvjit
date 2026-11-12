@@ -22,6 +22,7 @@
 #include "rvjit/implementation/rvv/isa/operation/conversion/conversion.hpp"
 #include "rvjit/implementation/rvv/isa/operation/memory/memory.hpp"
 #include "rvjit/implementation/rvv/rvv.hpp"
+#include "rvjit/implementation/rvv/typecast/typecast.hpp"
 #include "rvjit/interface/isa/types.hpp"
 #include "rvjit/interface/programming_model.hpp"
 #include "rvjit/utils/debug_def.hpp"
@@ -145,16 +146,18 @@ struct programming_model_t
     /// @note Returns false, emitting nothing, when that LMUL is fractional or
     ///     beyond m8
     bool set_vtype_keep_vl(SEW sew) const {
-        const int group = vgroup_size(vtype.lmulo);
-        const int from = sewb(vtype.sewo), to = sewb(sew);
-        const int scaled
-                = to >= from ? group * (to / from) : group / (from / to);
-        const bool fits = scaled >= 1 && scaled <= 8
-                && (to >= from ? true : group % (from / to) == 0);
-        CHECK(fits, "a configuration beyond the register groups");
-        e_->vsetvli(ignore_out, ignore_out, sew, lmul_for(scaled), vtype.vt,
-                vtype.vm);
+        LMUL lmul = LMUL::m1;
+        CHECK(keep_vl_lmul(vtype, sew, lmul),
+                "a configuration beyond the register groups");
+        e_->vsetvli(ignore_out, ignore_out, sew, lmul, vtype.vt, vtype.vm);
         return true;
+    }
+
+    /// A new typecast over the RVV conversion dialect, interposing the
+    /// `vsetvli`s of its widths against `vtype`
+    std::unique_ptr<rvjit::typecast::typecast_t> typecast() const override {
+        return std::unique_ptr<rvjit::typecast::typecast_t>(
+                new rvv::typecast::typecast_t(isa_.conversion(), e_, vtype));
     }
 
     /// Gets the maximum vector length for the host machine and vtype settings

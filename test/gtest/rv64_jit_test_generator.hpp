@@ -196,6 +196,18 @@ inline void expect_matching_pairs(rv64_jit_test_generator_t &k, int n) {
         EXPECT_EQ(code[2 * i], code[2 * i + 1]) << "mismatch at pair " << i;
 }
 
+/// Checks that `k` emitted `n` probe instructions, then the `n` reference
+/// instructions they must match, for probes of more than one instruction
+///
+/// @param k The generator holding the code
+/// @param n The number of instructions in each half
+inline void expect_matching_halves(rv64_jit_test_generator_t &k, int n) {
+    const auto *code = k.getCode<const uint32_t *>();
+    ASSERT_GT(k.getSize(), n * 2 * sizeof(uint32_t));
+    for (int i = 0; i < n; ++i)
+        EXPECT_EQ(code[i], code[n + i]) << "mismatch at instruction " << i;
+}
+
 } // namespace rvjit
 
 #endif

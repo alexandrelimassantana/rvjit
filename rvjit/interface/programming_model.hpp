@@ -18,11 +18,15 @@
 #define RVJIT_INTERFACE_PROGRAMMING_MODEL_HPP
 
 #include <array>
+#include <memory>
 
 #include "rvjit/interface/isa/isa.hpp"
 #include "rvjit/interface/isa/types.hpp"
 #include "rvjit/interface/loop/loopgen.hpp"
 #include "rvjit/interface/stream/stream.hpp"
+#include "rvjit/interface/typecast/typecast.hpp"
+
+#include "rvjit/utils/debug_def.hpp"
 
 namespace rvjit {
 
@@ -44,6 +48,14 @@ struct programming_model_t {
 
     /// The stream components
     virtual stream::stream_gen_t &streams() = 0;
+
+    /// A new, empty typecast over the conversion dialect of `isa()`
+    ///
+    /// @note Returns null when the implementation has no typecast
+    virtual std::unique_ptr<typecast::typecast_t> typecast() const {
+        LOG_FAIL(__func__, "unimplemented");
+        return nullptr;
+    }
 
     /// The components whose allocations a transaction must roll back together
     std::array<transactional_t *, 5> guards() {
@@ -117,5 +129,7 @@ protected:
 };
 
 } // namespace rvjit
+
+#include "rvjit/utils/debug_undef.hpp"
 
 #endif

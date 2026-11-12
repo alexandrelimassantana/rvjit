@@ -249,6 +249,26 @@ struct vtype_t {
     bool is_mixed() const { return !is_uniform(); }
 };
 
+/// The LMUL that keeps the output configuration's vector length at `sew`
+///
+/// @param vt The vector type settings, whose output SEW and LMUL are scaled
+/// @param sew The element width switched to
+/// @param lmul The LMUL found
+///
+/// @details The LMUL scales the output's by the ratio of the widths
+///
+/// @note Returns false, leaving `lmul` alone, when that LMUL is fractional or
+///     beyond m8
+inline bool keep_vl_lmul(const vtype_t &vt, SEW sew, LMUL &lmul) {
+    const int group = vgroup_size(vt.lmulo);
+    const int from = sewb(vt.sewo), to = sewb(sew);
+    const int scaled = to >= from ? group * (to / from) : group / (from / to);
+    const bool whole = to >= from || group % (from / to) == 0;
+    if (scaled < 1 || scaled > 8 || !whole) return false;
+    lmul = lmul_for(scaled);
+    return true;
+}
+
 } // namespace rvv
 } // namespace rvjit
 
