@@ -20,7 +20,7 @@
 #include "rvjit/implementation/common/stream/interleave.hpp"
 #include "rvjit/interface/core/index.hpp"
 #include "rvjit/interface/isa/conversion.hpp"
-#include "rvjit/interface/isa/operation/arithmetic.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/stream/memory/conversion_stream.hpp"
 #include "rvjit/interface/stream/memory/memory_operand.hpp"
 #include "rvjit/interface/stream/scheduler.hpp"
@@ -60,7 +60,7 @@ struct output_stream_t : public stream_impl_t {
 
     /// Configures the stream over a store operand
     ///
-    /// @param arith The arithmetic emitting the conversion
+    /// @param cvt The conversion dialect emitting the conversion
     /// @param sched The scheduler resolving the delay
     /// @param store The store operand, which the stream drives
     /// @param t The stored type (the operand's) and the type of the
@@ -69,9 +69,9 @@ struct output_stream_t : public stream_impl_t {
     /// @param configure The configuration switch, which the stream restores to
     ///     the accumulators' width after the stores
     ///
-    /// @note Returns false for a type pair no chain of steps of `arith`
+    /// @note Returns false for a type pair no chain of steps of `cvt`
     ///     converts
-    bool init(const operation::arithmetic_t &arith, const scheduler_t &sched,
+    bool init(const operation::conversion_t &cvt, const scheduler_t &sched,
             memory_operand_impl_t *store, const type_parameter_t &t,
             const policy_t &pol = policy_t::arithmetic(),
             const conversion::configure_t &configure
@@ -82,9 +82,9 @@ struct output_stream_t : public stream_impl_t {
         CHECK(op.data.type == t.mem, "a store of another type");
         CHECK(!t.narrows(), "a store wider than the accumulators");
         conversion_t conv;
-        CHECK(conv.plan_store(t, op.data.form, arith),
+        CHECK(conv.plan_store(t, op.data.form, cvt),
                 "unsupported conversion of the accumulators");
-        CHECK(conv_.init(arith, conv, store, t.reg, 0, configure),
+        CHECK(conv_.init(cvt, conv, store, t.reg, 0, configure),
                 "invalid conversion");
         sched_ = sched;
         pol_ = pol;

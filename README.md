@@ -156,9 +156,9 @@ vload(reg_name(v8), pointer_t(a0, 0)); // vle32.v v8, (a0)
 
 ### Arithmetic
 
-Multiply-accumulate, add, mul, zero, bitcast, widen, narrow, extend and
-convert, each an expression created from its operands' forms and types and
-called with their registers; one expression emits any number of times.
+Multiply-accumulate, add, mul, zero and bitcast, each an expression created
+from its operands' forms and types and called with their registers; one
+expression emits any number of times.
 `is_valid` tells whether the target can emit it. Interface:
 [`arithmetic.hpp`](rvjit/interface/isa/operation/arithmetic.hpp).
 
@@ -169,6 +169,19 @@ fma(reg_name(v16), reg_name(v8), reg_name(v12)); // vfmacc.vv v16, v8, v12
 const auto fma_vf = pm.isa().arithmetic().macc({form_t::vector, type_t::f32},
         {form_t::scalar, type_t::f32}, {form_t::vector, type_t::f32});
 fma_vf(reg_name(v16), reg_name(fa0), reg_name(v12)); // vfmacc.vf v16, fa0, v12
+```
+
+### Conversions
+
+Narrow, widen, extend and cast, each an expression over a source and a
+destination operand, created from their forms and types and called with
+their registers. `is_valid` tells whether the target can emit a conversion:
+RVV converts vectors and casts scalars through RV64. Interface:
+[`conversion.hpp`](rvjit/interface/isa/operation/conversion.hpp).
+
+```cpp
+const auto f2i = pm.isa().conversion().cast(form_t::vector, type_t::s32, type_t::f32);
+if (f2i.is_valid()) f2i(reg_name(v8), reg_name(v8)); // vfcvt.x.f.v v8, v8
 ```
 
 ### Loops

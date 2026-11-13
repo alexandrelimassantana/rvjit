@@ -72,18 +72,21 @@ struct programming_model_t {
     }
 };
 
-/// Assembles a `programming_model_t` from arithmetic/memory implementations
+/// Assembles a `programming_model_t` from arithmetic/memory/conversion
+/// implementations
 ///
-/// @details `ArithOp`/`MemOp` must be `emitter_t`-constructible
-///     `operation::arithmetic_t`/`operation::memory_t` implementers
+/// @details `ArithOp`/`MemOp`/`ConvOp` must be `emitter_t`-constructible
+///     `operation::arithmetic_t`/`operation::memory_t`/
+///     `operation::conversion_t` implementers
 ///
 /// @note Pool, loop, stack, transfer, const-arithmetic and control-flow
 ///     components are caller-owned references
-template <typename ArithOp, typename MemOp>
+template <typename ArithOp, typename MemOp, typename ConvOp>
 struct programming_model_compose_t : public programming_model_t {
     /// Assembles the model around caller-owned components
     ///
-    /// @param e The emitter the arithmetic and memory operations emit through
+    /// @param e The emitter the arithmetic, memory and conversion operations
+    ///     emit through
     /// @param pool The register allocation pool
     /// @param loop The loop factory
     /// @param stack The stack allocator
@@ -108,7 +111,7 @@ struct programming_model_compose_t : public programming_model_t {
     stream::stream_gen_t &streams() override { return streams_; }
 
 protected:
-    isa_compose_t<ArithOp, MemOp> isa_;
+    isa_compose_t<ArithOp, MemOp, ConvOp> isa_;
     loop::loopgen_t &loop_;
     stream::stream_gen_compose_t streams_;
 };

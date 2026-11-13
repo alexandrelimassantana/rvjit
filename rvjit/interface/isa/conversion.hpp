@@ -20,7 +20,7 @@
 #include <functional>
 
 #include "rvjit/interface/isa/operand.hpp"
-#include "rvjit/interface/isa/operation/arithmetic.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/isa/parameter.hpp"
 
 #include "rvjit/utils/debug_def.hpp"
@@ -28,7 +28,7 @@
 namespace rvjit {
 namespace conversion {
 
-/// The arithmetic expression a conversion step emits
+/// The conversion expression a step emits
 enum class kind_t {
     extend, // An integer 2x, 4x or 8x as wide, by sign or zeros
     widen, // A type 2x as wide
@@ -58,7 +58,7 @@ struct step_t {
 
 /// The steps converting a value between two types
 ///
-/// @details Pure data, planned against an arithmetic dialect. A widening
+/// @details Pure data, planned against a conversion dialect. A widening
 ///     conversion changes width at most once, in its first step, and then
 ///     converts in place; a narrowing one converts in place first and then
 ///     halves its width in place, step by step. So a widening reads the
@@ -77,17 +77,17 @@ struct conversion_t {
     /// @param from The type converted
     /// @param to The type produced
     /// @param form The storage category of the operands
-    /// @param arith The dialect every step must be supported by
+    /// @param cvt The dialect every step must be supported by
     ///
     /// @note Returns false, leaving the conversion empty, when no chain of
     ///     supported steps converts the pair
     bool plan(type_t from, type_t to, form_t form,
-            const operation::arithmetic_t &arith) {
+            const operation::conversion_t &cvt) {
         clear();
         form_ = form;
         if (from == to) return true;
         // Two types of one width and family, e.g. s8 and u8, need a step too
-        const bool ok = plan_(from, to) && n_ > 0 && supported_(arith);
+        const bool ok = plan_(from, to) && n_ > 0 && supported_(cvt);
         if (!ok) clear();
         CHECK(ok, "no conversion");
         return true;
@@ -97,20 +97,20 @@ struct conversion_t {
     ///
     /// @param t The value's types
     /// @param form The storage category of the operands
-    /// @param arith The dialect every step must be supported by
+    /// @param cvt The dialect every step must be supported by
     bool plan_load(const type_parameter_t &t, form_t form,
-            const operation::arithmetic_t &arith) {
-        return plan(t.mem, t.reg, form, arith);
+            const operation::conversion_t &cvt) {
+        return plan(t.mem, t.reg, form, cvt);
     }
 
     /// Plans the steps storing a value: from the registers into memory
     ///
     /// @param t The value's types
     /// @param form The storage category of the operands
-    /// @param arith The dialect every step must be supported by
+    /// @param cvt The dialect every step must be supported by
     bool plan_store(const type_parameter_t &t, form_t form,
-            const operation::arithmetic_t &arith) {
-        return plan(t.reg, t.mem, form, arith);
+            const operation::conversion_t &cvt) {
+        return plan(t.reg, t.mem, form, cvt);
     }
 
     /// Forgets every step
@@ -143,23 +143,23 @@ struct conversion_t {
     /// The operation of step `i`
     ///
     /// @param i The step's index
-    arithmetic::op_t op(int i) const {
+    conversion::op_t op(int i) const {
         const conversion::step_t &s = steps_[i];
-        return arithmetic::op_t::convert(s.to, s.from, form_);
+        return conversion::op_t(s.to, s.from, form_);
     }
 
     /// The expression of step `i`, emitted on its destination and source
     ///
     /// @param i The step's index
-    /// @param arith The dialect the expression is created by
-    arithmetic::expression_t expression(
-            int i, const operation::arithmetic_t &arith) const {
-        const arithmetic::op_t o = op(i);
+    /// @param cvt The dialect the expression is created by
+    conversion::expression_t expression(
+            int i, const operation::conversion_t &cvt) const {
+        const conversion::op_t o = op(i);
         switch (steps_[i].kind) {
-            case conversion::kind_t::extend: return arith.extend(o);
-            case conversion::kind_t::widen: return arith.widen(o);
-            case conversion::kind_t::convert: return arith.convert(o);
-            default: return arith.narrow(o);
+            case conversion::kind_t::extend: return cvt.extend(o);
+            case conversion::kind_t::widen: return cvt.widen(o);
+            case conversion::kind_t::convert: return cvt.cast(o);
+            default: return cvt.narrow(o);
         }
     }
 
@@ -245,9 +245,9 @@ private:
         return true;
     }
 
-    bool supported_(const operation::arithmetic_t &arith) const {
+    bool supported_(const operation::conversion_t &cvt) const {
         for (int i = 0; i < n_; ++i)
-            CHECK(expression(i, arith).is_valid(), "an unsupported step");
+            CHECK(expression(i, cvt).is_valid(), "an unsupported step");
         return true;
     }
 };

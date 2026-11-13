@@ -20,12 +20,8 @@
 #include "rvjit/implementation/rv64/isa/operation/arithmetic/bitcast.hpp"
 #include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/implementation/rvv/isa/operation/arithmetic/add.hpp"
-#include "rvjit/implementation/rvv/isa/operation/arithmetic/convert.hpp"
-#include "rvjit/implementation/rvv/isa/operation/arithmetic/extend.hpp"
 #include "rvjit/implementation/rvv/isa/operation/arithmetic/macc.hpp"
 #include "rvjit/implementation/rvv/isa/operation/arithmetic/mul.hpp"
-#include "rvjit/implementation/rvv/isa/operation/arithmetic/narrow.hpp"
-#include "rvjit/implementation/rvv/isa/operation/arithmetic/widen.hpp"
 #include "rvjit/implementation/rvv/isa/operation/arithmetic/zero.hpp"
 #include "rvjit/interface/isa/operation/arithmetic.hpp"
 
@@ -34,8 +30,7 @@ namespace rvv {
 namespace arithmetic {
 
 using arithmetic_t = operation::arithmetic_compose_t<macc_t, zero_t, mul_t,
-        add_t, rv64::arithmetic::bitcast_t, narrow_t, widen_t, extend_t,
-        convert_t>;
+        add_t, rv64::arithmetic::bitcast_t>;
 
 } // namespace arithmetic
 } // namespace rvv

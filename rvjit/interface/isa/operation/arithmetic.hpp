@@ -91,29 +91,6 @@ struct op_t : public typed_t {
                 && rs1.width == rs2.width;
     }
 
-    /// Whether the destination is half as wide as the only source
-    bool is_narrowing() const {
-        return is_binary() && 2 * rd.width == rs1.width;
-    }
-
-    /// Whether the destination is twice as wide as the only source
-    bool is_extending() const {
-        return is_binary() && rd.width == 2 * rs1.width;
-    }
-
-    /// Whether the destination is 2, 4 or 8 times as wide as the only source
-    bool is_extending_any() const {
-        if (!is_binary() || rs1.width <= 0) return false;
-        const int ratio = rd.width / rs1.width;
-        return rd.width % rs1.width == 0
-                && (ratio == 2 || ratio == 4 || ratio == 8);
-    }
-
-    /// Whether the only source changes between integer and float
-    bool is_converting() const {
-        return is_binary() && rd.is_float() != rs1.is_float();
-    }
-
     /// Sets every operand to the scalar form
     op_t &scalar() {
         rd.form = rs1.form = rs2.form = rvjit::form_t::scalar;
@@ -147,15 +124,6 @@ struct op_t : public typed_t {
     static op_t uniform(type_t dt, rvjit::form_t form) {
         const operand_t o(form, dt);
         return op_t(o, o, o);
-    }
-
-    /// Creates a binary operation converting `src` into `dst`
-    ///
-    /// @param dst The data type of the destination
-    /// @param src The data type of the source
-    /// @param form The storage category of both operands
-    static op_t convert(type_t dst, type_t src, rvjit::form_t form) {
-        return op_t(operand_t(form, dst), operand_t(form, src), absent_());
     }
 
     /// Creates a binary operation of the operands `dst` and `src`
@@ -349,56 +317,6 @@ struct arithmetic_t {
         return bitcast(arithmetic::op_t::binary(rd, rs1));
     }
 
-    /// Conversion of `rs1` into a type half as wide; integers saturate
-    ///
-    /// @param op The operation
-    ///
-    /// @pre The `op.is_narrowing()` expression is true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    /// @pre `rd` may name `rs1`, narrowing in place
-    arithmetic::expression_t narrow(const arithmetic::op_t &op) const {
-        return arithmetic::expression_t(narrow_(), op);
-    }
-
-    /// Conversion of `rs1` into a type twice as wide
-    ///
-    /// @param op The operation
-    ///
-    /// @pre The `op.is_extending()` expression is true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    /// @pre On vector forms, `rd` is not `rs1`: a source overlapping the
-    ///     destination group must be its highest-numbered part
-    arithmetic::expression_t widen(const arithmetic::op_t &op) const {
-        return arithmetic::expression_t(widen_(), op);
-    }
-
-    /// Integer extension of `rs1` into a type 2, 4 or 8 times as wide, by
-    /// the sign of a signed source and by zeros otherwise
-    ///
-    /// @param op The operation
-    ///
-    /// @pre The `op.is_extending_any()` expression is true
-    /// @pre On vector forms, the vtype is configured with the destination's
-    ///     SEW and LMUL, unlike `widen`
-    /// @pre On vector forms, a source overlapping the destination group must
-    ///     be its highest-numbered part
-    arithmetic::expression_t extend(const arithmetic::op_t &op) const {
-        return arithmetic::expression_t(extend_(), op);
-    }
-
-    /// Conversion of `rs1` between an integer and a float type, rounding as
-    /// the dynamic rounding mode says (round to nearest even unless changed)
-    ///
-    /// @param op The operation
-    ///
-    /// @pre The `op.is_converting()` expression is true; on vector forms both
-    ///     operands have the same width
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    /// @pre On vector forms, `rd` may name `rs1`, converting in place
-    arithmetic::expression_t convert(const arithmetic::op_t &op) const {
-        return arithmetic::expression_t(convert_(), op);
-    }
-
 protected:
     /// The logic of `macc`
     virtual const arithmetic::expression_impl_t &macc_() const {
@@ -425,26 +343,6 @@ protected:
         return unimplemented_();
     }
 
-    /// The logic of `narrow`
-    virtual const arithmetic::expression_impl_t &narrow_() const {
-        return unimplemented_();
-    }
-
-    /// The logic of `widen`
-    virtual const arithmetic::expression_impl_t &widen_() const {
-        return unimplemented_();
-    }
-
-    /// The logic of `extend`
-    virtual const arithmetic::expression_impl_t &extend_() const {
-        return unimplemented_();
-    }
-
-    /// The logic of `convert`
-    virtual const arithmetic::expression_impl_t &convert_() const {
-        return unimplemented_();
-    }
-
 private:
     static const arithmetic::expression_impl_t &unimplemented_() {
         static const arithmetic::expression_impl_t none;
@@ -457,8 +355,7 @@ private:
 /// @details Each implementation derives from `arithmetic::expression_impl_t`
 ///     and is constructible from `emitter_t`
 template <typename MaccOp, typename ZeroOp, typename MulOp, typename AddOp,
-        typename BitcastOp, typename NarrowOp, typename WidenOp,
-        typename ExtendOp, typename ConvertOp>
+        typename BitcastOp>
 struct arithmetic_compose_t : public arithmetic_t {
     /// Constructs every expression implementation
     ///
@@ -468,11 +365,7 @@ struct arithmetic_compose_t : public arithmetic_t {
         , zero_impl_(e)
         , mul_impl_(e)
         , add_impl_(e)
-        , bitcast_impl_(e)
-        , narrow_impl_(e)
-        , widen_impl_(e)
-        , extend_impl_(e)
-        , convert_impl_(e) {}
+        , bitcast_impl_(e) {}
 
 protected:
     const arithmetic::expression_impl_t &macc_() const override {
@@ -490,28 +383,12 @@ protected:
     const arithmetic::expression_impl_t &bitcast_() const override {
         return bitcast_impl_;
     }
-    const arithmetic::expression_impl_t &narrow_() const override {
-        return narrow_impl_;
-    }
-    const arithmetic::expression_impl_t &widen_() const override {
-        return widen_impl_;
-    }
-    const arithmetic::expression_impl_t &extend_() const override {
-        return extend_impl_;
-    }
-    const arithmetic::expression_impl_t &convert_() const override {
-        return convert_impl_;
-    }
 
     MaccOp macc_impl_;
     ZeroOp zero_impl_;
     MulOp mul_impl_;
     AddOp add_impl_;
     BitcastOp bitcast_impl_;
-    NarrowOp narrow_impl_;
-    WidenOp widen_impl_;
-    ExtendOp extend_impl_;
-    ConvertOp convert_impl_;
 };
 
 } // namespace operation

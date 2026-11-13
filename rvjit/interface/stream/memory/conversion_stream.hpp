@@ -19,7 +19,7 @@
 
 #include "rvjit/interface/core/index.hpp"
 #include "rvjit/interface/isa/conversion.hpp"
-#include "rvjit/interface/isa/operation/arithmetic.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/stream/stream_impl.hpp"
 
 #include "rvjit/utils/debug_def.hpp"
@@ -50,7 +50,7 @@ struct conversion_stream_t : public stream_impl_t {
 
     /// Configures the stream over the registers of `regs`
     ///
-    /// @param arith The arithmetic emitting the steps
+    /// @param cvt The conversion dialect emitting the steps
     /// @param conv The conversion
     /// @param regs The stream whose registers hold the values
     /// @param home The type whose width is in effect around the stream
@@ -58,7 +58,7 @@ struct conversion_stream_t : public stream_impl_t {
     ///     part a widening reads, 0 unless the conversion widens
     /// @param configure The configuration switch, empty when the caller keeps
     ///     a valid configuration
-    bool init(const operation::arithmetic_t &arith, const conversion_t &conv,
+    bool init(const operation::conversion_t &cvt, const conversion_t &conv,
             stream_impl_t *regs, type_t home, int offset = 0,
             const conversion::configure_t &configure
             = conversion::configure_t()) {
@@ -67,7 +67,7 @@ struct conversion_stream_t : public stream_impl_t {
                 = !conv.empty() && sewb(conv.to()) > sewb(conv.from());
         CHECK(!widens || offset > 0,
                 "a widening needs the upper part of a group");
-        arith_ = &arith;
+        cvt_ = &cvt;
         conv_ = conv;
         regs_ = regs;
         offset_ = widens ? offset : 0;
@@ -152,7 +152,7 @@ protected:
     }
 
 private:
-    const operation::arithmetic_t *arith_ = nullptr;
+    const operation::conversion_t *cvt_ = nullptr;
     conversion_t conv_;
     stream_impl_t *regs_ = nullptr;
     int offset_ = 0;
@@ -163,7 +163,7 @@ private:
 
     // Emits step `s` from `src` into `dst`, in its configuration
     void emit_step_(int s, name_t dst, name_t src) const {
-        conv_.expression(s, *arith_)(dst, src);
+        conv_.expression(s, *cvt_)(dst, src);
     }
 
     bool reconfigure_(type_t t) {

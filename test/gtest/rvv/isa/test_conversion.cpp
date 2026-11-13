@@ -19,7 +19,7 @@
 #include "gtest/gtest.h"
 
 #include "env.hpp"
-#include "rvjit/implementation/rvv/isa/operation/arithmetic/arithmetic.hpp"
+#include "rvjit/implementation/rvv/isa/operation/conversion/conversion.hpp"
 #include "rvjit/interface/isa/conversion.hpp"
 
 namespace rvjit {
@@ -30,7 +30,7 @@ namespace {
 TEST(conversion_plan, steps) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
-    rvv::arithmetic::arithmetic_t ar(env.e);
+    rvv::conversion::conversion_t ar(env.e);
     const auto vec = form_t::vector;
     const auto kinds = [&](type_t from, type_t to) {
         conversion_t c;
@@ -67,7 +67,7 @@ TEST(conversion_plan, steps) {
 TEST(conversion_plan, steps_configure_at_their_widths) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
-    rvv::arithmetic::arithmetic_t ar(env.e);
+    rvv::conversion::conversion_t ar(env.e);
     conversion_t c;
     ASSERT_TRUE(c.plan(type_t::f16, type_t::f32, form_t::vector, ar));
     EXPECT_EQ(c.step(0).config(), type_t::f16);
@@ -84,7 +84,7 @@ TEST(conversion_plan, steps_configure_at_their_widths) {
 TEST(conversion_plan, a_failed_plan_is_empty) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
-    rvv::arithmetic::arithmetic_t ar(env.e);
+    rvv::conversion::conversion_t ar(env.e);
     conversion_t c;
     ASSERT_TRUE(c.plan(type_t::f16, type_t::f32, form_t::vector, ar));
     EXPECT_FALSE(c.plan(type_t::s32, type_t::u32, form_t::vector, ar));
@@ -96,7 +96,7 @@ TEST(conversion_plan, a_failed_plan_is_empty) {
 TEST(conversion_plan, loads_and_stores_follow_the_value_types) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
-    rvv::arithmetic::arithmetic_t ar(env.e);
+    rvv::conversion::conversion_t ar(env.e);
     const type_parameter_t t(type_t::f16, type_t::f32);
     conversion_t c;
     ASSERT_TRUE(c.plan_load(t, form_t::vector, ar));

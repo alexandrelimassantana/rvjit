@@ -19,6 +19,7 @@
 
 #include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/implementation/rvv/isa/operation/arithmetic/arithmetic.hpp"
+#include "rvjit/implementation/rvv/isa/operation/conversion/conversion.hpp"
 #include "rvjit/implementation/rvv/isa/operation/memory/memory.hpp"
 #include "rvjit/implementation/rvv/rvv.hpp"
 #include "rvjit/interface/isa/types.hpp"
@@ -37,10 +38,10 @@ namespace rvv {
 ///     lowering its housed state into a `vsetvli` instruction
 struct programming_model_t
     : public programming_model_compose_t<rvv::arithmetic::arithmetic_t,
-              rvv::memory::memory_t> {
+              rvv::memory::memory_t, rvv::conversion::conversion_t> {
     static constexpr const char *NAME = "rvjit::rvv";
     using base_t = programming_model_compose_t<rvv::arithmetic::arithmetic_t,
-            rvv::memory::memory_t>;
+            rvv::memory::memory_t, rvv::conversion::conversion_t>;
 
     const vpu_t &model;
     vtype_t vtype;

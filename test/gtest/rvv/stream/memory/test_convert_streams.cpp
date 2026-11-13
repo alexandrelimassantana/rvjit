@@ -80,7 +80,7 @@ rv64_jit_probe_t::generate_fn_t narrow_store_probe(int rows, int delay) {
 
         output_stream_t out;
         {
-            const bool ok = out.init(env.pm.isa().arithmetic(),
+            const bool ok = out.init(env.pm.isa().conversion(),
                     env.pm.streams().scheduler(), store,
                     type_parameter_t(type_t::f16, type_t::f32),
                     policy_t::literal(delay));
@@ -133,7 +133,7 @@ std::string narrow_store_order(int rows, int delay, type_t acc) {
                         make_variant(rv64::stream::iterator::guided, 0, ring));
         output_stream_t out;
         {
-            const bool ok = out.init(env.pm.isa().arithmetic(),
+            const bool ok = out.init(env.pm.isa().conversion(),
                     env.pm.streams().scheduler(), store,
                     type_parameter_t(type_t::f16, acc),
                     policy_t::literal(delay));
@@ -183,13 +183,13 @@ TEST(output_stream_init, rejects_other_ratios) {
     ASSERT_TRUE(store->is_valid());
     output_stream_t out;
     {
-        const bool ok = out.init(env.pm.isa().arithmetic(),
+        const bool ok = out.init(env.pm.isa().conversion(),
                 env.pm.streams().scheduler(), store,
                 type_parameter_t(type_t::f16, type_t::f64), policy_t::zero());
         EXPECT_FALSE(ok);
     }
     {
-        const bool ok = out.init(env.pm.isa().arithmetic(),
+        const bool ok = out.init(env.pm.isa().conversion(),
                 env.pm.streams().scheduler(), store,
                 type_parameter_t(type_t::f16, type_t::s32), policy_t::zero());
         EXPECT_FALSE(ok);
@@ -211,13 +211,13 @@ TEST(conversion_stream, a_failed_switch_keeps_the_width) {
     ASSERT_TRUE(load->is_valid());
     conversion_t conv;
     ASSERT_TRUE(conv.plan(type_t::f16, type_t::f32, form_t::vector,
-            env.pm.isa().arithmetic()));
+            env.pm.isa().conversion()));
 
     int calls = 0;
     const auto refuse = [&calls](type_t) { return ++calls < 0; };
     stream::memory_operand::conversion_stream_t s;
     ASSERT_TRUE(s.init(
-            env.pm.isa().arithmetic(), conv, load, type_t::f32, 1, refuse));
+            env.pm.isa().conversion(), conv, load, type_t::f32, 1, refuse));
     EXPECT_FALSE(s.configure(0));
     EXPECT_FALSE(s.configure(0));
     EXPECT_EQ(calls, 2);
@@ -262,7 +262,7 @@ rv64_jit_probe_t::generate_fn_t widen_load_probe(int rows) {
 
         input_stream_t reload;
         {
-            const bool ok = reload.init(env.pm.isa().arithmetic(), load,
+            const bool ok = reload.init(env.pm.isa().conversion(), load,
                     type_parameter_t(type_t::f16, type_t::f32), offset);
             ASSERT_TRUE(ok);
         }
@@ -337,7 +337,7 @@ rv64_jit_probe_t::generate_fn_t chain_store_probe(int rows, type_t out) {
         const auto configure
                 = [&gen](type_t t) { return configure_from_e32_m4(gen, t); };
         {
-            const bool ok = stream.init(env.pm.isa().arithmetic(),
+            const bool ok = stream.init(env.pm.isa().conversion(),
                     env.pm.streams().scheduler(), store,
                     type_parameter_t(out, type_t::f32), policy_t::literal(1),
                     configure);
@@ -416,7 +416,7 @@ rv64_jit_probe_t::generate_fn_t chain_load_probe(int rows, type_t in) {
         const auto configure
                 = [&gen](type_t t) { return configure_from_e32_m4(gen, t); };
         {
-            const bool ok = reload.init(env.pm.isa().arithmetic(), load,
+            const bool ok = reload.init(env.pm.isa().conversion(), load,
                     type_parameter_t(in, type_t::f32), offset, configure);
             ASSERT_TRUE(ok);
         }
@@ -477,7 +477,7 @@ int widen_switches(int rows, bool batched) {
         const auto configure
                 = [&gen](type_t t) { return configure_from_e32_m4(gen, t); };
         {
-            const bool ok = in.init(env.pm.isa().arithmetic(), load,
+            const bool ok = in.init(env.pm.isa().conversion(), load,
                     type_parameter_t(type_t::f16, type_t::f32), 2, configure);
             ASSERT_TRUE(ok);
         }

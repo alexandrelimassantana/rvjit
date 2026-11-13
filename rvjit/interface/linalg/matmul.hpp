@@ -137,7 +137,7 @@ struct matmul_t {
         // epilogue's type
         conversion_t out;
         CHECK(out.plan(p.epi_type(), p.dtc.mem, impl_.c_form,
-                      pm_.isa().arithmetic()),
+                      pm_.isa().conversion()),
                 "unsupported conversion of the accumulators");
 
         // Create the dense loop nest, whose resources are drawn later, in the
@@ -376,7 +376,7 @@ struct matmul_t {
                         a_stream_ = ms.create(a_plan);
                         if (!a_stream_->is_valid()) return ms.miss();
                         if (plan_.dta.converts()
-                                && !a_in_.init(pm_.isa().arithmetic(),
+                                && !a_in_.init(pm_.isa().conversion(),
                                         a_stream_, plan_.dta, a_offset_,
                                         configure_))
                             return shortfall_t::of(resource_t::vectors);

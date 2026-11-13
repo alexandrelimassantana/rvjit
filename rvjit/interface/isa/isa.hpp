@@ -22,6 +22,7 @@
 #include "rvjit/interface/isa/operation/arithmetic.hpp"
 #include "rvjit/interface/isa/operation/const_arithmetic.hpp"
 #include "rvjit/interface/isa/operation/control_flow.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/isa/operation/memory.hpp"
 #include "rvjit/interface/isa/operation/transfer.hpp"
 #include "rvjit/interface/isa/types.hpp"
@@ -42,6 +43,9 @@ struct isa_t {
     /// Memory operation expressions
     virtual const operation::memory_t &memory() const = 0;
 
+    /// Conversion operation expressions
+    virtual const operation::conversion_t &conversion() const = 0;
+
     /// Value materialization, persistence, and update expressions
     virtual const operation::transfer_t &transfer() const = 0;
 
@@ -58,18 +62,20 @@ struct isa_t {
     virtual stack_t &stack() = 0;
 };
 
-/// Assembles an `isa_t` from arithmetic/memory implementations
+/// Assembles an `isa_t` from arithmetic/memory/conversion implementations
 ///
-/// @details `ArithOp`/`MemOp` must be `emitter_t`-constructible
-///     `operation::arithmetic_t`/`operation::memory_t` implementers
+/// @details `ArithOp`/`MemOp`/`ConvOp` must be `emitter_t`-constructible
+///     `operation::arithmetic_t`/`operation::memory_t`/
+///     `operation::conversion_t` implementers
 ///
 /// @note The pool, stack, transfer, const-arithmetic and control-flow
 ///     components are caller-owned references
-template <typename ArithOp, typename MemOp>
+template <typename ArithOp, typename MemOp, typename ConvOp>
 struct isa_compose_t : public isa_t {
     /// Assembles the operations around caller-owned components
     ///
-    /// @param e The emitter the arithmetic and memory operations emit through
+    /// @param e The emitter the arithmetic, memory and conversion operations
+    ///     emit through
     /// @param pool The register allocation pool
     /// @param stack The stack allocator
     /// @param xfer The value transfer operations
@@ -81,6 +87,7 @@ struct isa_compose_t : public isa_t {
             const operation::control_flow_t &cf)
         : arithmetic_(e)
         , memory_(e)
+        , conversion_(e)
         , pool_(pool)
         , stack_(stack)
         , transfer_(xfer)
@@ -91,6 +98,9 @@ struct isa_compose_t : public isa_t {
         return arithmetic_;
     }
     const operation::memory_t &memory() const override { return memory_; }
+    const operation::conversion_t &conversion() const override {
+        return conversion_;
+    }
     const operation::transfer_t &transfer() const override { return transfer_; }
     const operation::const_arithmetic_t &const_arithmetic() const override {
         return const_arithmetic_;
@@ -104,6 +114,7 @@ struct isa_compose_t : public isa_t {
 protected:
     ArithOp arithmetic_;
     MemOp memory_;
+    ConvOp conversion_;
     buffer::buffer_pool_t &pool_;
     stack_t &stack_;
     const operation::transfer_t &transfer_;

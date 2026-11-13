@@ -276,7 +276,7 @@ struct accumulate_t : public postop_t {
                 variant);
         if (!load_->is_valid()) return env.ms.miss();
         if (!in_.init(
-                    env.pm.isa().arithmetic(), load_, c, offset, env.configure))
+                    env.pm.isa().conversion(), load_, c, offset, env.configure))
             return shortfall_t::of(resource_t::integers);
         return {};
     }
@@ -426,7 +426,7 @@ struct bias_add_t : public postop_t {
         bias_ = env.create_c(spec, variant);
         if (!bias_->is_valid()) return env.ms.miss();
         if (!in_.init(
-                    env.pm.isa().arithmetic(), bias_, b, offset, env.configure))
+                    env.pm.isa().conversion(), bias_, b, offset, env.configure))
             return shortfall_t::of(resource_t::integers);
         return {};
     }

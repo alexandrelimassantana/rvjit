@@ -19,7 +19,7 @@
 
 #include "rvjit/interface/core/index.hpp"
 #include "rvjit/interface/isa/conversion.hpp"
-#include "rvjit/interface/isa/operation/arithmetic.hpp"
+#include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/stream/buffer_map.hpp"
 #include "rvjit/interface/stream/memory/conversion_stream.hpp"
 #include "rvjit/interface/stream/memory/memory_operand.hpp"
@@ -53,7 +53,7 @@ struct input_stream_t : public stream_impl_t {
 
     /// Configures the stream over a load operand
     ///
-    /// @param arith The arithmetic emitting the conversion
+    /// @param cvt The conversion dialect emitting the conversion
     /// @param load The load operand, which the stream drives
     /// @param t The loaded type (the operand's) and the type the registers
     ///     compute in
@@ -62,9 +62,9 @@ struct input_stream_t : public stream_impl_t {
     /// @param configure The configuration switch, which the stream restores to
     ///     the computing type's width after converting
     ///
-    /// @note Returns false for a type pair no chain of steps of `arith`
+    /// @note Returns false for a type pair no chain of steps of `cvt`
     ///     converts
-    bool init(const operation::arithmetic_t &arith, memory_operand_impl_t *load,
+    bool init(const operation::conversion_t &cvt, memory_operand_impl_t *load,
             const type_parameter_t &t, int offset,
             const conversion::configure_t &configure
             = conversion::configure_t()) {
@@ -74,9 +74,9 @@ struct input_stream_t : public stream_impl_t {
         CHECK(op.data.type == t.mem, "a load of another type");
         CHECK(!t.narrows(), "a loaded type wider than the computing type");
         conversion_t conv;
-        CHECK(conv.plan_load(t, op.data.form, arith),
+        CHECK(conv.plan_load(t, op.data.form, cvt),
                 "unsupported conversion of the loaded type");
-        CHECK(conv_.init(arith, conv, load, t.reg, offset, configure),
+        CHECK(conv_.init(cvt, conv, load, t.reg, offset, configure),
                 "invalid conversion");
         load_ = load;
         return true;
