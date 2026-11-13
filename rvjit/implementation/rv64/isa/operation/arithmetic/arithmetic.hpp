@@ -27,28 +27,24 @@ namespace rvjit {
 namespace rv64 {
 namespace arithmetic {
 
+/// RV64 arithmetic dialect: scalar zero and bitcast only
 struct arithmetic_t : public operation::arithmetic_t {
     /// Creates the component
     ///
     /// @param e The emitter instructions are emitted through
-    explicit arithmetic_t(rvjit::emitter_t e) : zero_(e), bitcast_(e) {}
-
-    bool supports_zero(const rvjit::arithmetic::op_t &op) const override {
-        return zero_.supports(op);
-    }
-    bool zero(const rvjit::arithmetic::op_t &op) const override {
-        return zero_(op);
-    }
-    bool supports_bitcast(const rvjit::arithmetic::op_t &op) const override {
-        return bitcast_.supports(op);
-    }
-    bool bitcast(const rvjit::arithmetic::op_t &op) const override {
-        return bitcast_(op);
-    }
+    explicit arithmetic_t(rvjit::emitter_t e)
+        : zero_impl_(e), bitcast_impl_(e) {}
 
 protected:
-    zero_t zero_;
-    bitcast_t bitcast_;
+    const rvjit::arithmetic::expression_impl_t &zero_() const override {
+        return zero_impl_;
+    }
+    const rvjit::arithmetic::expression_impl_t &bitcast_() const override {
+        return bitcast_impl_;
+    }
+
+    zero_t zero_impl_;
+    bitcast_t bitcast_impl_;
 };
 
 } // namespace arithmetic

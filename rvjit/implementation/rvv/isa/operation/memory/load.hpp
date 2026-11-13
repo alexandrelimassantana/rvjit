@@ -45,9 +45,9 @@ struct load_t : public rv64::memory::load_t {
     /// Whether `op` is a supported scalar or vector load
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::memory::op_t &op) const {
+    bool is_valid(const rvjit::memory::op_t &op) const override {
         if (!op.data.is_defined()) return false;
-        if (op.data.is_scalar()) return rv64::memory::load_t::supports(op);
+        if (op.data.is_scalar()) return rv64::memory::load_t::is_valid(op);
         const int w = op.data.width;
         return w == 1 || w == 2 || w == 4 || w == 8;
     }
@@ -57,30 +57,36 @@ struct load_t : public rv64::memory::load_t {
     /// @details Emission follows `op.data` and `op.vector_mode`
     ///
     /// @param op The operation, in the scalar or vector form
+    /// @param args The data register, the address, and the stride or index
+    ///     register
     ///
-    /// @pre Scalar `op.data` follows `rv64::memory::load_t::operator()`
-    bool operator()(const rvjit::memory::op_t &op) const {
-        if (op.data.is_scalar()) return rv64::memory::load_t::operator()(op);
+    /// @pre Scalar `op.data` follows `rv64::memory::load_t::emit`
+    void emit(const rvjit::memory::op_t &op,
+            const rvjit::memory::args_t &args) const override {
+        if (op.data.is_scalar()) {
+            rv64::memory::load_t::emit(op, args);
+            return;
+        }
 
-        CHECK(op.data.is_valid(), "invalid operand descriptor");
-        CHECK(supports(op), "unsupported datatype width");
-        const VReg vd(op.data.name);
+        CHECK_OR_RET(op.data.is_valid() && args.data != no_name, ,
+                "invalid operand descriptor");
+        CHECK_OR_RET(load_t::is_valid(op), , "unsupported datatype width");
+        const VReg vd(args.data);
         switch (op.vector_mode) {
             case rvjit::memory::vec_addr_t::unit:
-                vle(vd, op.addr, op.data.width,
+                vle(vd, args.addr, op.data.width,
                         rv64::isa_traits_base_t::vm(op.predicate));
-                return true;
+                return;
             case rvjit::memory::vec_addr_t::stride:
-                vlse(vd, op.addr, reg_t(op.args), op.data.width,
+                vlse(vd, args.addr, reg_t(args.args), op.data.width,
                         rv64::isa_traits_base_t::vm(op.predicate));
-                return true;
+                return;
             case rvjit::memory::vec_addr_t::index:
-                vluxei(vd, op.addr, vreg_t(op.args), op.data.width,
+                vluxei(vd, args.addr, vreg_t(args.args), op.data.width,
                         rv64::isa_traits_base_t::vm(op.predicate));
-                return true;
+                return;
         }
-        LOG_FAIL("operator()", "invalid descriptor");
-        return false;
+        LOG_FAIL("emit", "invalid descriptor");
     }
 
     /// General unit-stride vector load

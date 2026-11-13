@@ -59,7 +59,7 @@ struct stream_gen_compose_t : public stream_gen_t {
     /// @param arith The arithmetic operation operand streams zero through
     /// @param memops The memory operand factory
     /// @param sched The scheduler for composing instruction streams
-    explicit stream_gen_compose_t(operation::arithmetic_t &arith,
+    explicit stream_gen_compose_t(const operation::arithmetic_t &arith,
             memory_operand::memory_operand_t &memops, const scheduler_t &sched)
         : memory_operand_(memops)
         , scheduler_(sched)

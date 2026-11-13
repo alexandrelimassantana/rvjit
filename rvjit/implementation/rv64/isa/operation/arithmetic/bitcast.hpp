@@ -30,7 +30,7 @@ namespace arithmetic {
 /// General integer-to-float scalar bit-pattern move
 ///
 /// @details Emits `fmv.h.x`, `fmv.w.x` or `fmv.d.x` by the float width
-struct bitcast_t {
+struct bitcast_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rv64::arithmetic";
 
     /// Creates the component
@@ -41,7 +41,7 @@ struct bitcast_t {
     /// Whether `op` moves an int scalar into a same-width f16/f32/f64 scalar
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         if (!op.is_binary() || !op.rd.is_defined() || !op.rs1.is_defined())
             return false;
         if (!op.rd.is_scalar() || !op.rs1.is_scalar()) return false;
@@ -52,19 +52,20 @@ struct bitcast_t {
                 && op.rd.width == op.rs1.width;
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_binary(), "expected a binary operand descriptor");
-        CHECK(all_valid(op.rd, op.rs1), "invalid operand descriptor");
-        CHECK(supports(op), "invalid descriptor");
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(op.is_binary(), , "expected a binary operand descriptor");
+        CHECK_OR_RET(all_valid(op.rd, op.rs1) && args.named(2), ,
+                "invalid operand descriptor");
+        CHECK_OR_RET(bitcast_t::is_valid(op), , "invalid descriptor");
 
-        const FReg fd(op.rd.name);
-        const Reg rs(op.rs1.name);
+        const FReg fd(args.rd);
+        const Reg rs(args.rs1);
         switch (op.rd.width) {
             case 2: e_->fmv_h_x(fd, rs); break;
             case 4: e_->fmv_w_x(fd, rs); break;
             default: e_->fmv_d_x(fd, rs); break;
         }
-        return true;
     }
 
 private:

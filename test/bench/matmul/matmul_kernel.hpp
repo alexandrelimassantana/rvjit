@@ -65,16 +65,12 @@ struct quadruple_postop_t : public postop_t {
     }
 
     bool emit(postop_tile_t &t) override {
-        auto op = rvjit::arithmetic::op_t::uniform(
-                t.env.plan.epi_type(), t.env.c_form);
+        const auto add = t.env.pm.isa().arithmetic().add(
+                t.env.c_form, t.env.plan.epi_type());
         t.for_each_acc([&](name_t a, const index_t &) {
             const name_t s = t.env.scratch.acc(0);
-            op.rd.name = s;
-            op.rs1.name = op.rs2.name = a;
-            t.env.pm.isa().arithmetic().add(op);
-            op.rd.name = a;
-            op.rs1.name = op.rs2.name = s;
-            t.env.pm.isa().arithmetic().add(op);
+            add(s, a, a);
+            add(a, s, s);
         });
         return true;
     }

@@ -37,10 +37,10 @@ struct isa_t {
     virtual ~isa_t() = default;
 
     /// Arithmetic operation expressions
-    virtual operation::arithmetic_t &arithmetic() = 0;
+    virtual const operation::arithmetic_t &arithmetic() const = 0;
 
     /// Memory operation expressions
-    virtual operation::memory_t &memory() = 0;
+    virtual const operation::memory_t &memory() const = 0;
 
     /// Value materialization, persistence, and update expressions
     virtual const operation::transfer_t &transfer() const = 0;
@@ -87,8 +87,10 @@ struct isa_compose_t : public isa_t {
         , const_arithmetic_(arith)
         , control_flow_(cf) {}
 
-    operation::arithmetic_t &arithmetic() override { return arithmetic_; }
-    operation::memory_t &memory() override { return memory_; }
+    const operation::arithmetic_t &arithmetic() const override {
+        return arithmetic_;
+    }
+    const operation::memory_t &memory() const override { return memory_; }
     const operation::transfer_t &transfer() const override { return transfer_; }
     const operation::const_arithmetic_t &const_arithmetic() const override {
         return const_arithmetic_;

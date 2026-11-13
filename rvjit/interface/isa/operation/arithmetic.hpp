@@ -18,6 +18,7 @@
 #define RVJIT_INTERFACE_ISA_OPERATION_ARITHMETIC_HPP
 
 #include "rvjit/interface/isa/operand.hpp"
+#include "rvjit/interface/isa/operation/expression.hpp"
 #include "rvjit/interface/isa/types.hpp"
 #include "rvjit/utils/utils.hpp"
 
@@ -28,7 +29,10 @@ namespace arithmetic {
 
 using operand_t = rvjit::operand_t;
 
-/// Generic arithmetic instruction involving up to three operands
+/// Generic arithmetic operation involving up to three operands
+///
+/// @details Describes the forms and types of the operands; the registers are
+///     the arguments of the expression emitting it (`args_t`)
 struct op_t : public typed_t {
     operand_t rd = absent_();
     operand_t rs1 = absent_();
@@ -50,7 +54,7 @@ struct op_t : public typed_t {
     op_t(const operand_t &dst, const operand_t &src1, const operand_t &src2)
         : rd(dst), rs1(src1), rs2(src2) {}
 
-    /// Creates a ternary operation from data types, with no register names
+    /// Creates a ternary operation from data types
     ///
     /// @param dst The destination data type
     /// @param src1 The first source data type
@@ -110,36 +114,6 @@ struct op_t : public typed_t {
         return is_binary() && rd.is_float() != rs1.is_float();
     }
 
-    /// A copy with the destination register `d`
-    ///
-    /// @param d The destination register name
-    op_t names(name_t d) const {
-        op_t o = *this;
-        o.rd.name = d;
-        return o;
-    }
-
-    /// A copy with the destination `d` and first source `s1` registers
-    ///
-    /// @param d The destination register name
-    /// @param s1 The first source register name
-    op_t names(name_t d, name_t s1) const {
-        op_t o = names(d);
-        o.rs1.name = s1;
-        return o;
-    }
-
-    /// A copy with the destination `d` and source `s1`, `s2` registers
-    ///
-    /// @param d The destination register name
-    /// @param s1 The first source register name
-    /// @param s2 The second source register name
-    op_t names(name_t d, name_t s1, name_t s2) const {
-        op_t o = names(d, s1);
-        o.rs2.name = s2;
-        return o;
-    }
-
     /// Sets every operand to the scalar form
     op_t &scalar() {
         rd.form = rs1.form = rs2.form = rvjit::form_t::scalar;
@@ -184,6 +158,14 @@ struct op_t : public typed_t {
         return op_t(operand_t(form, dst), operand_t(form, src), absent_());
     }
 
+    /// Creates a binary operation of the operands `dst` and `src`
+    ///
+    /// @param dst The destination operand
+    /// @param src The source operand
+    static op_t binary(const operand_t &dst, const operand_t &src) {
+        return op_t(dst, src, absent_());
+    }
+
     /// Creates a ternary operation whose sources are `dt` and destination
     /// is the natural 2x-wide type of `dt`
     ///
@@ -204,6 +186,32 @@ private:
     }
 };
 
+/// The registers an arithmetic expression is emitted on
+struct args_t {
+    name_t rd;
+    name_t rs1;
+    name_t rs2;
+
+    /// Names the registers of the operands, absent ones `no_name`
+    ///
+    /// @param rd The destination register
+    /// @param rs1 The first source register
+    /// @param rs2 The second source register
+    args_t(name_t rd, name_t rs1 = no_name, name_t rs2 = no_name)
+        : rd(rd), rs1(rs1), rs2(rs2) {}
+
+    /// Whether the first `n` registers are named
+    ///
+    /// @param n The number of operands, 1 to 3
+    bool named(int n) const {
+        return rd != no_name && (n < 2 || rs1 != no_name)
+                && (n < 3 || rs2 != no_name);
+    }
+};
+
+using expression_t = operation::expression_t<op_t, args_t>;
+using expression_impl_t = operation::expression_impl_t<op_t, args_t>;
+
 } // namespace arithmetic
 } // namespace rvjit
 
@@ -211,232 +219,243 @@ namespace rvjit {
 namespace operation {
 
 /// Arithmetic expressions
+///
+/// @details A factory of `arithmetic::expression_t`: each method binds an
+///     operation to the ISA logic of its kind, and the expression is then
+///     called with the registers, e.g. `macc(form, dt)(rd, rs1, rs2)`. Each
+///     kind takes the whole `arithmetic::op_t`, or the shapes of its common
+///     forms
+///
+/// @note An implementation overrides the protected accessors of the kinds it
+///     implements; the others are never valid
 struct arithmetic_t {
     static constexpr const char *NAME = "rvjit::operation::arithmetic";
 
     virtual ~arithmetic_t() = default;
 
-    /// Multiply-accumulate expression
+    /// Multiply-accumulate expression, `rd += rs1 * rs2`
     ///
-    /// @param op The operation, `rd += rs1 * rs2`
+    /// @param op The operation
     ///
-    /// @note Returns false if code emission fails
+    /// @pre The `op.is_ternary()` expression is true
+    arithmetic::expression_t macc(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(macc_(), op);
+    }
+
+    /// Multiply-accumulate expression whose operands share a form and type
     ///
-    /// @pre The `op.is_ternary()` expression must be true
-    /// @pre Caller must supply operand combinations supported by the ISA
+    /// @param form The storage category of every operand
+    /// @param dt The data type of every operand
+    arithmetic::expression_t macc(form_t form, type_t dt) const {
+        return macc(arithmetic::op_t::uniform(dt, form));
+    }
+
+    /// Multiply-accumulate expression of three operands
+    ///
+    /// @param rd The destination operand
+    /// @param rs1 The first source operand
+    /// @param rs2 The second source operand
+    arithmetic::expression_t macc(const operand_t &rd, const operand_t &rs1,
+            const operand_t &rs2) const {
+        return macc(arithmetic::op_t(rd, rs1, rs2));
+    }
+
+    /// Clear buffer expression, clearing `rd`
+    ///
+    /// @param op The operation
+    ///
+    /// @pre The `op.is_unary()` expression is true
+    arithmetic::expression_t zero(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(zero_(), op);
+    }
+
+    /// Clear buffer expression of an operand
+    ///
+    /// @param form The storage category of `rd`
+    /// @param dt The data type of `rd`
+    arithmetic::expression_t zero(form_t form, type_t dt) const {
+        return zero(arithmetic::op_t(operand_t(form, dt)));
+    }
+
+    /// Multiplication expression, `rd = rs1 * rs2`
+    ///
+    /// @param op The operation
+    ///
+    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
+    arithmetic::expression_t mul(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(mul_(), op);
+    }
+
+    /// Multiplication expression whose operands share a form and type
+    ///
+    /// @param form The storage category of every operand
+    /// @param dt The data type of every operand
+    arithmetic::expression_t mul(form_t form, type_t dt) const {
+        return mul(arithmetic::op_t::uniform(dt, form));
+    }
+
+    /// Multiplication expression of three operands
+    ///
+    /// @param rd The destination operand
+    /// @param rs1 The first source operand
+    /// @param rs2 The second source operand
+    arithmetic::expression_t mul(const operand_t &rd, const operand_t &rs1,
+            const operand_t &rs2) const {
+        return mul(arithmetic::op_t(rd, rs1, rs2));
+    }
+
+    /// Addition expression, `rd = rs1 + rs2`
+    ///
+    /// @param op The operation
+    ///
+    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
+    arithmetic::expression_t add(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(add_(), op);
+    }
+
+    /// Addition expression whose operands share a form and type
+    ///
+    /// @param form The storage category of every operand
+    /// @param dt The data type of every operand
+    arithmetic::expression_t add(form_t form, type_t dt) const {
+        return add(arithmetic::op_t::uniform(dt, form));
+    }
+
+    /// Addition expression of three operands
+    ///
+    /// @param rd The destination operand
+    /// @param rs1 The first source operand
+    /// @param rs2 The second source operand
+    arithmetic::expression_t add(const operand_t &rd, const operand_t &rs1,
+            const operand_t &rs2) const {
+        return add(arithmetic::op_t(rd, rs1, rs2));
+    }
+
+    /// Bit-pattern move from an integer `rs1` into a float `rd`
+    ///
+    /// @param op The operation
+    ///
+    /// @pre The `op.is_binary()` expression is true and both widths match
+    arithmetic::expression_t bitcast(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(bitcast_(), op);
+    }
+
+    /// Bit-pattern move between two operands
+    ///
+    /// @param rd The float destination operand
+    /// @param rs1 The integer source operand
+    arithmetic::expression_t bitcast(
+            const operand_t &rd, const operand_t &rs1) const {
+        return bitcast(arithmetic::op_t::binary(rd, rs1));
+    }
+
+    /// Conversion of `rs1` into a type half as wide; integers saturate
+    ///
+    /// @param op The operation
+    ///
+    /// @pre The `op.is_narrowing()` expression is true
     /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    virtual bool macc(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// @pre `rd` may name `rs1`, narrowing in place
+    arithmetic::expression_t narrow(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(narrow_(), op);
     }
 
-    /// Whether `macc` can emit `op`, ignoring the operands' register names
+    /// Conversion of `rs1` into a type twice as wide
     ///
-    /// @param op The operation checked
-    virtual bool supports_macc(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// @param op The operation
+    ///
+    /// @pre The `op.is_extending()` expression is true
+    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
+    /// @pre On vector forms, `rd` is not `rs1`: a source overlapping the
+    ///     destination group must be its highest-numbered part
+    arithmetic::expression_t widen(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(widen_(), op);
     }
 
-    /// Whether `zero` can emit `op`, ignoring the operands' register names
+    /// Integer extension of `rs1` into a type 2, 4 or 8 times as wide, by
+    /// the sign of a signed source and by zeros otherwise
     ///
-    /// @param op The operation checked
-    virtual bool supports_zero(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `mul` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_mul(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `add` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_add(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `bitcast` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_bitcast(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `narrow` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_narrow(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `widen` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_widen(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `extend` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_extend(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Whether `convert` can emit `op`, ignoring the operands' register names
-    ///
-    /// @param op The operation checked
-    virtual bool supports_convert(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
-    }
-
-    /// Integer extension of `rs1` into a type 2, 4 or 8 times as wide
-    ///
-    /// @param op The operation, `rd = extend(rs1)`, by the sign of a signed
-    ///     source and by zeros otherwise
-    ///
-    /// @note Returns false if code emission fails
+    /// @param op The operation
     ///
     /// @pre The `op.is_extending_any()` expression is true
     /// @pre On vector forms, the vtype is configured with the destination's
     ///     SEW and LMUL, unlike `widen`
     /// @pre On vector forms, a source overlapping the destination group must
     ///     be its highest-numbered part
-    virtual bool extend(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    arithmetic::expression_t extend(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(extend_(), op);
     }
 
-    /// Conversion of `rs1` between an integer and a float type
+    /// Conversion of `rs1` between an integer and a float type, rounding as
+    /// the dynamic rounding mode says (round to nearest even unless changed)
     ///
-    /// @param op The operation, `rd = convert(rs1)`, rounding as the dynamic
-    ///     rounding mode says (round to nearest even unless changed)
-    ///
-    /// @note Returns false if code emission fails
+    /// @param op The operation
     ///
     /// @pre The `op.is_converting()` expression is true; on vector forms both
     ///     operands have the same width
     /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
     /// @pre On vector forms, `rd` may name `rs1`, converting in place
-    virtual bool convert(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    arithmetic::expression_t convert(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(convert_(), op);
     }
 
-    /// Conversion of `rs1` into a type half as wide
-    ///
-    /// @param op The operation, `rd = narrow(rs1)`; integers saturate
-    ///
-    /// @note Returns false if code emission fails
-    ///
-    /// @pre The `op.is_narrowing()` expression is true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    /// @pre `rd` may name `rs1`, narrowing in place
-    virtual bool narrow(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+protected:
+    /// The logic of `macc`
+    virtual const arithmetic::expression_impl_t &macc_() const {
+        return unimplemented_();
     }
 
-    /// Conversion of `rs1` into a type twice as wide
-    ///
-    /// @param op The operation, `rd = widen(rs1)`
-    ///
-    /// @note Returns false if code emission fails
-    ///
-    /// @pre The `op.is_extending()` expression is true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    /// @pre On vector forms, `rd` is not `rs1`: a source overlapping the
-    ///     destination group must be its highest-numbered part
-    virtual bool widen(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// The logic of `zero`
+    virtual const arithmetic::expression_impl_t &zero_() const {
+        return unimplemented_();
     }
 
-    /// Multiplication expression
-    ///
-    /// @param op The operation, `rd = rs1 * rs2`
-    ///
-    /// @note Returns false if code emission fails
-    ///
-    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    virtual bool mul(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// The logic of `mul`
+    virtual const arithmetic::expression_impl_t &mul_() const {
+        return unimplemented_();
     }
 
-    /// Addition expression
-    ///
-    /// @param op The operation, `rd = rs1 + rs2`
-    ///
-    /// @note Returns false if code emission fails
-    ///
-    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    virtual bool add(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// The logic of `add`
+    virtual const arithmetic::expression_impl_t &add_() const {
+        return unimplemented_();
     }
 
-    /// Bit-pattern move from an integer scalar into a float scalar
-    ///
-    /// @param op The operation, from `rs1` into `rd`
-    ///
-    /// @note Returns false if code emission fails
-    ///
-    /// @pre The `op.is_binary()` expression is true and both widths match
-    virtual bool bitcast(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// The logic of `bitcast`
+    virtual const arithmetic::expression_impl_t &bitcast_() const {
+        return unimplemented_();
     }
 
-    /// Clear buffer expression
-    ///
-    /// @param op The operation, clearing `rd`
-    ///
-    /// @note Returns false if code emission fails
-    ///
-    /// @pre The `op.is_unary()` expression must be true
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    virtual bool zero(const arithmetic::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// The logic of `narrow`
+    virtual const arithmetic::expression_impl_t &narrow_() const {
+        return unimplemented_();
+    }
+
+    /// The logic of `widen`
+    virtual const arithmetic::expression_impl_t &widen_() const {
+        return unimplemented_();
+    }
+
+    /// The logic of `extend`
+    virtual const arithmetic::expression_impl_t &extend_() const {
+        return unimplemented_();
+    }
+
+    /// The logic of `convert`
+    virtual const arithmetic::expression_impl_t &convert_() const {
+        return unimplemented_();
+    }
+
+private:
+    static const arithmetic::expression_impl_t &unimplemented_() {
+        static const arithmetic::expression_impl_t none;
+        return none;
     }
 };
 
 /// Assembles an `arithmetic_t` from individual expression implementations
 ///
-/// @details The expression must be constructible from `emitter_t`
+/// @details Each implementation derives from `arithmetic::expression_impl_t`
+///     and is constructible from `emitter_t`
 template <typename MaccOp, typename ZeroOp, typename MulOp, typename AddOp,
         typename BitcastOp, typename NarrowOp, typename WidenOp,
         typename ExtendOp, typename ConvertOp>
@@ -445,71 +464,54 @@ struct arithmetic_compose_t : public arithmetic_t {
     ///
     /// @param e The emitter the expressions emit through
     explicit arithmetic_compose_t(emitter_t e)
-        : macc_(e)
-        , zero_(e)
-        , mul_(e)
-        , add_(e)
-        , bitcast_(e)
-        , narrow_(e)
-        , widen_(e)
-        , extend_(e)
-        , convert_(e) {}
-
-    bool supports_macc(const arithmetic::op_t &op) const override {
-        return macc_.supports(op);
-    }
-    bool supports_zero(const arithmetic::op_t &op) const override {
-        return zero_.supports(op);
-    }
-    bool supports_mul(const arithmetic::op_t &op) const override {
-        return mul_.supports(op);
-    }
-    bool supports_add(const arithmetic::op_t &op) const override {
-        return add_.supports(op);
-    }
-    bool supports_bitcast(const arithmetic::op_t &op) const override {
-        return bitcast_.supports(op);
-    }
-    bool supports_narrow(const arithmetic::op_t &op) const override {
-        return narrow_.supports(op);
-    }
-    bool supports_widen(const arithmetic::op_t &op) const override {
-        return widen_.supports(op);
-    }
-    bool narrow(const arithmetic::op_t &op) const override {
-        return narrow_(op);
-    }
-    bool widen(const arithmetic::op_t &op) const override { return widen_(op); }
-    bool supports_extend(const arithmetic::op_t &op) const override {
-        return extend_.supports(op);
-    }
-    bool supports_convert(const arithmetic::op_t &op) const override {
-        return convert_.supports(op);
-    }
-    bool extend(const arithmetic::op_t &op) const override {
-        return extend_(op);
-    }
-    bool convert(const arithmetic::op_t &op) const override {
-        return convert_(op);
-    }
-    bool macc(const arithmetic::op_t &op) const override { return macc_(op); }
-    bool zero(const arithmetic::op_t &op) const override { return zero_(op); }
-    bool mul(const arithmetic::op_t &op) const override { return mul_(op); }
-    bool add(const arithmetic::op_t &op) const override { return add_(op); }
-    bool bitcast(const arithmetic::op_t &op) const override {
-        return bitcast_(op);
-    }
+        : macc_impl_(e)
+        , zero_impl_(e)
+        , mul_impl_(e)
+        , add_impl_(e)
+        , bitcast_impl_(e)
+        , narrow_impl_(e)
+        , widen_impl_(e)
+        , extend_impl_(e)
+        , convert_impl_(e) {}
 
 protected:
-    MaccOp macc_;
-    ZeroOp zero_;
-    MulOp mul_;
-    AddOp add_;
-    BitcastOp bitcast_;
-    NarrowOp narrow_;
-    WidenOp widen_;
-    ExtendOp extend_;
-    ConvertOp convert_;
+    const arithmetic::expression_impl_t &macc_() const override {
+        return macc_impl_;
+    }
+    const arithmetic::expression_impl_t &zero_() const override {
+        return zero_impl_;
+    }
+    const arithmetic::expression_impl_t &mul_() const override {
+        return mul_impl_;
+    }
+    const arithmetic::expression_impl_t &add_() const override {
+        return add_impl_;
+    }
+    const arithmetic::expression_impl_t &bitcast_() const override {
+        return bitcast_impl_;
+    }
+    const arithmetic::expression_impl_t &narrow_() const override {
+        return narrow_impl_;
+    }
+    const arithmetic::expression_impl_t &widen_() const override {
+        return widen_impl_;
+    }
+    const arithmetic::expression_impl_t &extend_() const override {
+        return extend_impl_;
+    }
+    const arithmetic::expression_impl_t &convert_() const override {
+        return convert_impl_;
+    }
+
+    MaccOp macc_impl_;
+    ZeroOp zero_impl_;
+    MulOp mul_impl_;
+    AddOp add_impl_;
+    BitcastOp bitcast_impl_;
+    NarrowOp narrow_impl_;
+    WidenOp widen_impl_;
+    ExtendOp extend_impl_;
+    ConvertOp convert_impl_;
 };
 
 } // namespace operation

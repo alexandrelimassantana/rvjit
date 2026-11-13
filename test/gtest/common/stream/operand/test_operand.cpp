@@ -28,16 +28,27 @@ buffer_map_t ring(const name_t *ids, int n, int rows, int cols) {
     return buffer_map_t(buffer::buffer_t(ids, n), {rows, cols});
 }
 
-// Records the register of every zeroed accumulator position
-struct recording_arithmetic_t : public operation::arithmetic_t {
-    bool zero(const arithmetic::op_t &op) const override {
-        zeroed.push_back(op.rd.name);
+// Records the register and type of every zeroed accumulator position
+struct recording_zero_t : public arithmetic::expression_impl_t {
+    bool is_valid(const arithmetic::op_t &) const override { return true; }
+    void emit(const arithmetic::op_t &op,
+            const arithmetic::args_t &args) const override {
+        zeroed.push_back(args.rd);
         types.push_back(op.rd.type);
-        return true;
     }
 
     mutable std::vector<name_t> zeroed;
     mutable std::vector<type_t> types;
+};
+
+// A dialect whose only expression is the recording zero
+struct recording_arithmetic_t : public operation::arithmetic_t {
+    recording_zero_t impl;
+    const std::vector<name_t> &zeroed = impl.zeroed;
+    const std::vector<type_t> &types = impl.types;
+
+protected:
+    const arithmetic::expression_impl_t &zero_() const override { return impl; }
 };
 
 rvjit::operand_t f32_traits() {

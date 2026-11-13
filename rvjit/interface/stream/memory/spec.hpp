@@ -42,6 +42,10 @@ enum class axis_role_t {
 struct spec_t {
     memory::op_t op;
 
+    /// The register holding the stride of a strided `op`, or the offsets of
+    /// an indexed one; `no_name` for a unit-stride or scalar `op`
+    name_t args = no_name;
+
     /// Role of each axis of the register ring, which shares the space's axes
     axis_role_t role[NDIMS] = {};
 

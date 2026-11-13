@@ -134,7 +134,10 @@ struct impl_t : public rvjit::linalg::matmul::impl_t {
         spec.addressing = rvjit::stream::iterator::addressing_t::base_only;
         variant.strategy = rv64::stream::iterator::guided;
         variant.ntmp = 2;
-        if (is_transa_) spec.op.strided(a_ld_.buffer());
+        if (is_transa_) {
+            spec.op.strided();
+            spec.args = reg_name(a_ld_.buffer());
+        }
     }
 
     /// @details B is read with scalar loads, which take an immediate offset:

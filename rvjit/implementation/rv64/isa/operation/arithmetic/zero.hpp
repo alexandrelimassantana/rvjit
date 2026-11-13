@@ -27,7 +27,7 @@ namespace rvjit {
 namespace rv64 {
 namespace arithmetic {
 
-struct zero_t {
+struct zero_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rv64::arithmetic";
 
     /// Creates the component
@@ -38,20 +38,21 @@ struct zero_t {
     /// Whether `op` is a unary scalar descriptor
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         return op.is_unary() && op.rd.is_defined() && op.rd.is_scalar();
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_unary(), "expected a unary operand descriptor");
-        CHECK(op.rd.is_valid(), "invalid operand descriptor");
-        CHECK(supports(op), "vector zero not supported");
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(op.is_unary(), , "expected a unary operand descriptor");
+        CHECK_OR_RET(op.rd.is_valid() && args.named(1), ,
+                "invalid operand descriptor");
+        CHECK_OR_RET(zero_t::is_valid(op), , "vector zero not supported");
 
         if (op.rd.is_int())
-            e_->mv(reg_t(op.rd.name), zero);
+            e_->mv(reg_t(args.rd), zero);
         else
-            e_->fmv_d_x(freg_t(op.rd.name), zero);
-        return true;
+            e_->fmv_d_x(freg_t(args.rd), zero);
     }
 
 private:

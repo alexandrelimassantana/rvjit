@@ -37,7 +37,7 @@ namespace arithmetic {
 ///
 /// @pre The caller must issue `vsetvli` prior to calling this expression and
 ///     the `vtype` must be configured using the inputs SEW configuration
-struct macc_t {
+struct macc_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rvv::arithmetic";
 
     /// Creates the component
@@ -48,43 +48,46 @@ struct macc_t {
     /// Whether `op` maps to a supported macc instruction
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         return select_(op) != sel_t::none;
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_ternary(), "expected a ternary operand descriptor");
-        CHECK(all_valid(op.rd, op.rs1, op.rs2), "invalid operand descriptor");
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(
+                op.is_ternary(), , "expected a ternary operand descriptor");
+        CHECK_OR_RET(all_valid(op.rd, op.rs1, op.rs2) && args.named(3), ,
+                "invalid operand descriptor");
         const sel_t sel = select_(op);
-        CHECK(sel != sel_t::none, "invalid descriptor");
+        CHECK_OR_RET(sel != sel_t::none, , "invalid descriptor");
 
-        const VReg vd(op.rd.name), vs2(op.rs2.name);
+        const VReg vd(args.rd), vs2(args.rs2);
         const VM vm = rv64::isa_traits_base_t::vm(op.predicate);
         if (op.rs1.is_scalar() && op.rs1.is_int()) {
-            const Reg rs1(op.rs1.name);
+            const Reg rs1(args.rs1);
             switch (sel) {
                 case sel_t::vmacc: e_->vmacc_vx(vd, rs1, vs2, vm); break;
                 case sel_t::vwmacc: e_->vwmacc_vx(vd, rs1, vs2, vm); break;
                 case sel_t::vwmaccu: e_->vwmaccu_vx(vd, rs1, vs2, vm); break;
                 case sel_t::vwmaccsu: e_->vwmaccsu_vx(vd, rs1, vs2, vm); break;
                 case sel_t::vwmaccus: e_->vwmaccus_vx(vd, rs1, vs2, vm); break;
-                default: return false;
+                default: return;
             }
-            return true;
+            return;
         }
         if (op.rs1.is_scalar()) {
-            const FReg fs1(op.rs1.name);
+            const FReg fs1(args.rs1);
             switch (sel) {
                 case sel_t::vfmacc: e_->vfmacc_vf(vd, fs1, vs2, vm); break;
                 case sel_t::vfwmacc: e_->vfwmacc_vf(vd, fs1, vs2, vm); break;
                 case sel_t::vfwmaccbf16:
                     e_->vfwmaccbf16_vf(vd, fs1, vs2, vm);
                     break;
-                default: return false;
+                default: return;
             }
-            return true;
+            return;
         }
-        const VReg vs1(op.rs1.name);
+        const VReg vs1(args.rs1);
         switch (sel) {
             case sel_t::vmacc: e_->vmacc_vv(vd, vs1, vs2, vm); break;
             case sel_t::vwmacc: e_->vwmacc_vv(vd, vs1, vs2, vm); break;
@@ -95,9 +98,8 @@ struct macc_t {
             case sel_t::vfwmaccbf16:
                 e_->vfwmaccbf16_vv(vd, vs1, vs2, vm);
                 break;
-            default: return false;
+            default: return;
         }
-        return true;
     }
 
 private:

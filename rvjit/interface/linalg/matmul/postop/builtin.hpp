@@ -152,26 +152,19 @@ struct scalar_t {
         return true;
     }
 
-    /// Loads the bits unless `loaded`, and returns the scalar register operand
+    /// Loads the bits unless `loaded`, and returns the register holding the
+    /// scalar
     ///
     /// @param env The environment of the matmul
     /// @param f The float register a float scalar is moved into
     /// @param loaded Whether the bits were loaded already
-    operand_t load(
-            postop_env_t &env, const freg_t &f, bool loaded = false) const {
+    name_t load(postop_env_t &env, const freg_t &f, bool loaded = false) const {
         if (!loaded) env.pm.isa().transfer().init(var_);
-        operand_t o(form_t::scalar, dt_);
-        if (!float_) {
-            o.name = reg_name(var_.buffer());
-            return o;
-        }
-        arithmetic::op_t b;
-        b.rd = operand_t(form_t::scalar, dt_, reg_name(f));
-        b.rs1 = operand_t(
-                form_t::scalar, bits_type(dt_), reg_name(var_.buffer()));
-        env.pm.isa().arithmetic().bitcast(b);
-        o.name = reg_name(f);
-        return o;
+        if (!float_) return reg_name(var_.buffer());
+        const auto bits = env.pm.isa().arithmetic().bitcast(
+                {form_t::scalar, dt_}, {form_t::scalar, bits_type(dt_)});
+        bits(reg_name(f), reg_name(var_.buffer()));
+        return reg_name(f);
     }
 
     /// The variable holding the bits
@@ -210,22 +203,17 @@ struct scale_t : public postop_t {
         const form_t form = t.env.c_form;
         if (mode_ == scalar_mode_t::one) return true;
         if (mode_ == scalar_mode_t::zero) {
-            t.for_each_acc([&](name_t acc, const index_t &) {
-                arithmetic::op_t z(operand_t(form, dtc, acc));
-                pm.isa().arithmetic().zero(z);
-            });
+            const auto zero = pm.isa().arithmetic().zero(form, dtc);
+            t.for_each_acc([&](name_t acc, const index_t &) { zero(acc); });
             return true;
         }
-        const operand_t scalar = alpha_.load(t.env,
+        const name_t alpha = alpha_.load(t.env,
                 t.env.scratch.floats.size() > 0 ? t.env.scratch.f(0)
                                                 : freg_t());
-        auto mul = arithmetic::op_t::uniform(dtc, form);
-        mul.rs1.form = form_t::scalar;
-        mul.rs1.name = scalar.name;
-        t.for_each_acc([&](name_t acc, const index_t &) {
-            mul.rd.name = mul.rs2.name = acc;
-            pm.isa().arithmetic().mul(mul);
-        });
+        const auto scale = pm.isa().arithmetic().mul(
+                {form, dtc}, {form_t::scalar, dtc}, {form, dtc});
+        t.for_each_acc(
+                [&](name_t acc, const index_t &) { scale(acc, alpha, acc); });
         return true;
     }
 
@@ -306,25 +294,22 @@ struct accumulate_t : public postop_t {
         const int total = t.nb * t.mb;
 
         // Fold each loaded C granule into its accumulator, scaled by beta
-        const auto body = [&](const operand_t &beta) {
-            auto op = arithmetic::op_t::uniform(dtc, env.c_form);
-            if (mode_ == scalar_mode_t::value) {
-                op.rs1.form = form_t::scalar;
-                op.rs1.name = beta.name;
-            }
+        const auto body = [&](name_t beta) {
+            const auto &arith = pm.isa().arithmetic();
+            const form_t c = env.c_form;
+            const bool scaled = mode_ == scalar_mode_t::value;
+            const auto fold = scaled
+                    ? arith.macc({c, dtc}, {form_t::scalar, dtc}, {c, dtc})
+                    : arith.add(c, dtc);
             const auto at = [&](int i) { return index_t {i / t.mb, i % t.mb}; };
             const auto combine = [&](int i) {
                 const index_t idx = at(i);
-                op.rd.name = op.rs2.name
+                const auto acc
                         = static_cast<name_t>(t.acc.get({idx[1], idx[0]}));
-                if (mode_ != scalar_mode_t::value)
-                    op.rs1.name = in_.get(idx);
+                if (scaled)
+                    fold(acc, beta, in_.get(idx));
                 else
-                    op.rs2.name = in_.get(idx);
-                if (mode_ == scalar_mode_t::value)
-                    pm.isa().arithmetic().macc(op);
-                else
-                    pm.isa().arithmetic().add(op);
+                    fold(acc, in_.get(idx), acc);
             };
             if (in_.converts()) {
                 // The loads of a ring's worth of positions run ahead of their
@@ -352,7 +337,7 @@ struct accumulate_t : public postop_t {
         };
 
         if (mode_ == scalar_mode_t::one) {
-            body({});
+            body(no_name);
             return true;
         }
         const freg_t f
@@ -415,7 +400,10 @@ struct bias_add_t : public postop_t {
 
         stream::memory_operand::spec_t spec;
         spec.op = memory::op_t::load(env.c_form, mem);
-        if (scalar_) spec.op.strided(reg_t::zero());
+        if (scalar_) {
+            spec.op.strided();
+            spec.args = reg_name(reg_t::zero());
+        }
         spec.origin = pointer_t(ptr_);
         spec.space = stream::iterator::space_t(
                 {1, rows_}, {const_t(0), scalar_ ? const_t(0) : m_stride_});
@@ -465,12 +453,10 @@ struct bias_add_t : public postop_t {
         in_.resize({1, rows});
         in_.fetch_convert([](int j) { return index_t {0, j}; }, rows);
 
-        auto add = arithmetic::op_t::uniform(
-                t.env.plan.epi_type(), t.env.c_form);
+        const auto add = pm.isa().arithmetic().add(
+                t.env.c_form, t.env.plan.epi_type());
         t.for_each_acc([&](name_t acc, const index_t &mn) {
-            add.rd.name = add.rs2.name = acc;
-            add.rs1.name = in_.get({0, scalar_ ? 0 : mn[0]});
-            pm.isa().arithmetic().add(add);
+            add(acc, in_.get({0, scalar_ ? 0 : mn[0]}), acc);
         });
         return true;
     }

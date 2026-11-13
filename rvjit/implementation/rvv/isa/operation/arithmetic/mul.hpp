@@ -36,7 +36,7 @@ namespace arithmetic {
 /// @note The scalar operand, if any, is `rs1`
 ///
 /// @pre The caller must issue `vsetvli` prior to calling this expression
-struct mul_t {
+struct mul_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rvv::arithmetic";
 
     /// Creates the component
@@ -47,7 +47,7 @@ struct mul_t {
     /// Whether `op` maps to a supported instruction
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         if (!op.is_ternary() || !op.rd.is_vector() || !op.is_uniform())
             return false;
         if (!op.rd.is_defined() || !op.rs1.is_defined() || !op.rs2.is_defined())
@@ -61,25 +61,27 @@ struct mul_t {
                 || t == rvjit::type_t::f64;
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_ternary(), "expected a ternary operand descriptor");
-        CHECK(all_valid(op.rd, op.rs1, op.rs2), "invalid operand descriptor");
-        CHECK(supports(op), "invalid descriptor");
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(
+                op.is_ternary(), , "expected a ternary operand descriptor");
+        CHECK_OR_RET(all_valid(op.rd, op.rs1, op.rs2) && args.named(3), ,
+                "invalid operand descriptor");
+        CHECK_OR_RET(is_valid(op), , "invalid descriptor");
 
-        const VReg vd(op.rd.name), vs2(op.rs2.name);
+        const VReg vd(args.rd), vs2(args.rs2);
         const VM vm = rv64::isa_traits_base_t::vm(op.predicate);
         if (op.rd.is_int()) {
             if (op.rs1.is_scalar())
-                e_->vmul_vx(vd, vs2, reg_t(op.rs1.name), vm);
+                e_->vmul_vx(vd, vs2, reg_t(args.rs1), vm);
             else
-                e_->vmul_vv(vd, vs2, vreg_t(op.rs1.name), vm);
+                e_->vmul_vv(vd, vs2, vreg_t(args.rs1), vm);
         } else {
             if (op.rs1.is_scalar())
-                e_->vfmul_vf(vd, vs2, freg_t(op.rs1.name), vm);
+                e_->vfmul_vf(vd, vs2, freg_t(args.rs1), vm);
             else
-                e_->vfmul_vv(vd, vs2, vreg_t(op.rs1.name), vm);
+                e_->vfmul_vv(vd, vs2, vreg_t(args.rs1), vm);
         }
-        return true;
     }
 
 private:

@@ -26,21 +26,6 @@ namespace rvjit {
 
 using namespace Xbyak_riscv;
 
-/// Copies `op`, assigning `d`/`a`/`b` as `rd`/`rs1`/`rs2`'s own names
-static arithmetic::op_t with_names(
-        arithmetic::op_t op, name_t d, name_t a, name_t b) {
-    op.rd.name = d;
-    op.rs1.name = a;
-    op.rs2.name = b;
-    return op;
-}
-
-/// Builds a unary `op_t`, assigning `d` as `rd`'s own name
-static arithmetic::op_t unary_with_name(rvjit::operand_t rd, name_t d) {
-    rd.name = d;
-    return arithmetic::op_t(rd);
-}
-
 /// Invalid dtype/instruction-class combinations emit nothing
 TEST(macc_emission, invalid_parameters) {
     using op_t = type_t;
@@ -55,21 +40,16 @@ TEST(macc_emission, invalid_parameters) {
         const auto b = 24;
 
         // None of these should emit anything
-        mc.macc(with_names(arithmetic::op_t(op_t::s64, op_t::u8, op_t::s8,
-                                   rvjit::form_t::vector),
-                d, a, b));
-        mc.macc(with_names(
-                arithmetic::op_t::widening(op_t::s64, rvjit::form_t::vector), d,
-                a, b));
-        mc.macc(with_names(arithmetic::op_t(op_t::s32, op_t::s16, op_t::s8,
-                                   rvjit::form_t::vector),
-                d, a, b));
-        mc.macc(with_names(
-                arithmetic::op_t::uniform(op_t::bf16, rvjit::form_t::vector), d,
-                a, b));
-        mc.macc(with_names(arithmetic::op_t(op_t::f16, op_t::f32, op_t::f32,
-                                   rvjit::form_t::vector),
-                d, a, b));
+        mc.macc(arithmetic::op_t(
+                op_t::s64, op_t::u8, op_t::s8, rvjit::form_t::vector))(d, a, b);
+        mc.macc(arithmetic::op_t::widening(op_t::s64, rvjit::form_t::vector))(
+                d, a, b);
+        mc.macc(arithmetic::op_t(op_t::s32, op_t::s16, op_t::s8,
+                rvjit::form_t::vector))(d, a, b);
+        mc.macc(arithmetic::op_t::uniform(op_t::bf16, rvjit::form_t::vector))(
+                d, a, b);
+        mc.macc(arithmetic::op_t(op_t::f16, op_t::f32, op_t::f32,
+                rvjit::form_t::vector))(d, a, b);
 
         gen.ret();
     });
@@ -97,37 +77,32 @@ TEST(macc_emission, valid_instructions) {
 
         // Uniform int
         for (auto dt : {op_t::s8, op_t::s32}) {
-            mc.macc(with_names(
-                    arithmetic::op_t::uniform(dt, rvjit::form_t::vector), d, a,
-                    b));
+            mc.macc(arithmetic::op_t::uniform(dt, rvjit::form_t::vector))(
+                    d, a, b);
             gen.vmacc_vv(vd, vs1, vs2);
         }
 
         // Widening int
         for (auto dt : {op_t::s8}) {
-            mc.macc(with_names(
-                    arithmetic::op_t::widening(dt, rvjit::form_t::vector), d, a,
-                    b));
+            mc.macc(arithmetic::op_t::widening(dt, rvjit::form_t::vector))(
+                    d, a, b);
             gen.vwmacc_vv(vd, vs1, vs2);
         }
-        mc.macc(with_names(
-                arithmetic::op_t::widening(op_t::u8, rvjit::form_t::vector), d,
-                a, b));
+        mc.macc(arithmetic::op_t::widening(op_t::u8, rvjit::form_t::vector))(
+                d, a, b);
         gen.vwmaccu_vv(vd, vs1, vs2);
 
         // Uniform float
         for (auto dt : {op_t::f32}) {
-            mc.macc(with_names(
-                    arithmetic::op_t::uniform(dt, rvjit::form_t::vector), d, a,
-                    b));
+            mc.macc(arithmetic::op_t::uniform(dt, rvjit::form_t::vector))(
+                    d, a, b);
             gen.vfmacc_vv(vd, vs1, vs2);
         }
 
         // Widening float
         for (auto dt : {op_t::f16, op_t::bf16}) {
-            mc.macc(with_names(
-                    arithmetic::op_t::widening(dt, rvjit::form_t::vector), d, a,
-                    b));
+            mc.macc(arithmetic::op_t::widening(dt, rvjit::form_t::vector))(
+                    d, a, b);
             switch (dt) {
                 case op_t::bf16: gen.vfwmaccbf16_vv(vd, vs1, vs2); break;
                 default: gen.vfwmacc_vv(vd, vs1, vs2); break;
@@ -155,18 +130,15 @@ TEST(zero_emission, valid_dispatch) {
         const auto vd = VReg(d);
 
         // Int scalar
-        mc.zero(unary_with_name(
-                rvjit::operand_t(rvjit::form_t::scalar, op_t::s32), d));
+        mc.zero(rvjit::form_t::scalar, op_t::s32)(d);
         gen.mv(rd, x0);
 
         // Float scalar
-        mc.zero(unary_with_name(
-                rvjit::operand_t(rvjit::form_t::scalar, op_t::f32), d));
+        mc.zero(rvjit::form_t::scalar, op_t::f32)(d);
         gen.fmv_d_x(fd, x0);
 
         // Vector (default form)
-        mc.zero(unary_with_name(
-                rvjit::operand_t(rvjit::form_t::vector, op_t::f32), d));
+        mc.zero(rvjit::form_t::vector, op_t::f32)(d);
         gen.vmv_v_i(vd, 0);
 
         gen.ret();
@@ -175,7 +147,7 @@ TEST(zero_emission, valid_dispatch) {
     expect_matching_pairs(kernel, n_pairs);
 }
 
-/// `supports_*` validates dtype/form combinations without register names
+/// `is_valid` validates dtype/form combinations without registers
 TEST(macc_supports, dtype_combinations) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
@@ -183,32 +155,32 @@ TEST(macc_supports, dtype_combinations) {
     using arithmetic::op_t;
     const auto vec = form_t::vector;
 
-    EXPECT_TRUE(ar.supports_macc(op_t::uniform(type_t::f32, vec)));
+    EXPECT_TRUE(ar.macc(op_t::uniform(type_t::f32, vec)).is_valid());
     {
         const auto op = op_t::uniform(type_t::f32, vec).vector_scalar();
-        EXPECT_TRUE(ar.supports_macc(op));
+        EXPECT_TRUE(ar.macc(op).is_valid());
     }
-    EXPECT_TRUE(ar.supports_macc(op_t::widening(type_t::f16, vec)));
-    EXPECT_TRUE(ar.supports_macc(op_t::widening(type_t::s8, vec)));
+    EXPECT_TRUE(ar.macc(op_t::widening(type_t::f16, vec)).is_valid());
+    EXPECT_TRUE(ar.macc(op_t::widening(type_t::s8, vec)).is_valid());
 
     // No 4x widening, no narrowing
     {
         const op_t op(type_t::s32, type_t::s8, type_t::s8, vec);
-        EXPECT_FALSE(ar.supports_macc(op));
+        EXPECT_FALSE(ar.macc(op).is_valid());
     }
     {
         const op_t op(type_t::s8, type_t::s32, type_t::s32, vec);
-        EXPECT_FALSE(ar.supports_macc(op));
+        EXPECT_FALSE(ar.macc(op).is_valid());
     }
 
     // `us` widening only exists in the vector-scalar form
     op_t us = op_t::widening(type_t::s8, vec);
     us.rs1 = rvjit::operand_t(vec, type_t::u8);
-    EXPECT_FALSE(ar.supports_macc(us));
-    EXPECT_TRUE(ar.supports_macc(us.vector_scalar()));
+    EXPECT_FALSE(ar.macc(us).is_valid());
+    EXPECT_TRUE(ar.macc(us.vector_scalar()).is_valid());
 
-    EXPECT_TRUE(ar.supports_zero(op_t(rvjit::operand_t(vec, type_t::f32))));
-    EXPECT_FALSE(ar.supports_macc(op_t(rvjit::operand_t(vec, type_t::f32))));
+    EXPECT_TRUE(ar.zero(op_t(rvjit::operand_t(vec, type_t::f32))).is_valid());
+    EXPECT_FALSE(ar.macc(op_t(rvjit::operand_t(vec, type_t::f32))).is_valid());
 }
 
 /// mul and add emit the vector-vector and vector-scalar mnemonics
@@ -229,30 +201,30 @@ TEST(mul_add_emission, valid_instructions) {
 
         // Vector-vector, int and float
         auto vv = arithmetic::op_t::uniform(op_t::s16, rvjit::form_t::vector);
-        ar.mul(with_names(vv, d, a, b));
+        ar.mul(vv)(d, a, b);
         gen.vmul_vv(vd, vs2, vs1);
-        ar.add(with_names(vv, d, a, b));
+        ar.add(vv)(d, a, b);
         gen.vadd_vv(vd, vs2, vs1);
 
         auto fvv = arithmetic::op_t::uniform(op_t::f64, rvjit::form_t::vector);
-        ar.mul(with_names(fvv, d, a, b));
+        ar.mul(fvv)(d, a, b);
         gen.vfmul_vv(vd, vs2, vs1);
-        ar.add(with_names(fvv, d, a, b));
+        ar.add(fvv)(d, a, b);
         gen.vfadd_vv(vd, vs2, vs1);
 
         // Vector-scalar: the scalar is `rs1`
         auto vx = arithmetic::op_t::uniform(op_t::s32, rvjit::form_t::vector)
                           .vector_scalar();
-        ar.mul(with_names(vx, d, a, b));
+        ar.mul(vx)(d, a, b);
         gen.vmul_vx(vd, vs2, Reg(a));
-        ar.add(with_names(vx, d, a, b));
+        ar.add(vx)(d, a, b);
         gen.vadd_vx(vd, vs2, Reg(a));
 
         auto vf = arithmetic::op_t::uniform(op_t::f32, rvjit::form_t::vector)
                           .vector_scalar();
-        ar.mul(with_names(vf, d, a, b));
+        ar.mul(vf)(d, a, b);
         gen.vfmul_vf(vd, vs2, FReg(a));
-        ar.add(with_names(vf, d, a, b));
+        ar.add(vf)(d, a, b);
         gen.vfadd_vf(vd, vs2, FReg(a));
 
         gen.ret();
@@ -269,12 +241,12 @@ TEST(mul_add_supports, rejections) {
     using arithmetic::op_t;
     const auto vec = form_t::vector;
 
-    EXPECT_TRUE(ar.supports_mul(op_t::uniform(type_t::u8, vec)));
-    EXPECT_TRUE(ar.supports_add(op_t::uniform(type_t::f16, vec)));
-    EXPECT_FALSE(ar.supports_mul(op_t::widening(type_t::s8, vec)));
-    EXPECT_FALSE(ar.supports_add(op_t::uniform(type_t::bf16, vec)));
-    EXPECT_FALSE(ar.supports_mul(op_t::uniform(type_t::f32, form_t::scalar)));
-    EXPECT_FALSE(ar.supports_add(op_t(rvjit::operand_t(vec, type_t::f32))));
+    EXPECT_TRUE(ar.mul(op_t::uniform(type_t::u8, vec)).is_valid());
+    EXPECT_TRUE(ar.add(op_t::uniform(type_t::f16, vec)).is_valid());
+    EXPECT_FALSE(ar.mul(op_t::widening(type_t::s8, vec)).is_valid());
+    EXPECT_FALSE(ar.add(op_t::uniform(type_t::bf16, vec)).is_valid());
+    EXPECT_FALSE(ar.mul(op_t::uniform(type_t::f32, form_t::scalar)).is_valid());
+    EXPECT_FALSE(ar.add(op_t(rvjit::operand_t(vec, type_t::f32))).is_valid());
 }
 
 /// bitcast moves integer bits into a float register of the same width
@@ -285,17 +257,15 @@ TEST(bitcast_emission, widths) {
         env_t env(gen);
         rvv::arithmetic::arithmetic_t ar(env.e);
 
-        const auto make = [](type_t f, type_t i) {
-            arithmetic::op_t op;
-            op.rd = rvjit::operand_t(rvjit::form_t::scalar, f, 3);
-            op.rs1 = rvjit::operand_t(rvjit::form_t::scalar, i, 5);
-            return op;
+        const auto sca = rvjit::form_t::scalar;
+        const auto emit = [&](type_t f, type_t i) {
+            ar.bitcast({sca, f}, {sca, i})(3, 5);
         };
-        ar.bitcast(make(type_t::f16, type_t::s16));
+        emit(type_t::f16, type_t::s16);
         gen.fmv_h_x(FReg(3), Reg(5));
-        ar.bitcast(make(type_t::f32, type_t::s32));
+        emit(type_t::f32, type_t::s32);
         gen.fmv_w_x(FReg(3), Reg(5));
-        ar.bitcast(make(type_t::f64, type_t::s64));
+        emit(type_t::f64, type_t::s64);
         gen.fmv_d_x(FReg(3), Reg(5));
 
         gen.ret();
@@ -310,16 +280,14 @@ TEST(bitcast_supports, shapes) {
     env_t env(gen);
     rvv::arithmetic::arithmetic_t ar(env.e);
 
-    const auto make = [](type_t f, type_t i) {
-        arithmetic::op_t op;
-        op.rd = rvjit::operand_t(rvjit::form_t::scalar, f);
-        op.rs1 = rvjit::operand_t(rvjit::form_t::scalar, i);
-        return op;
+    const auto sca = rvjit::form_t::scalar;
+    const auto valid = [&](type_t f, type_t i) {
+        return ar.bitcast({sca, f}, {sca, i}).is_valid();
     };
-    EXPECT_TRUE(ar.supports_bitcast(make(type_t::f32, type_t::s32)));
-    EXPECT_FALSE(ar.supports_bitcast(make(type_t::f32, type_t::s64)));
-    EXPECT_FALSE(ar.supports_bitcast(make(type_t::s32, type_t::s32)));
-    EXPECT_FALSE(ar.supports_bitcast(make(type_t::bf16, type_t::s16)));
+    EXPECT_TRUE(valid(type_t::f32, type_t::s32));
+    EXPECT_FALSE(valid(type_t::f32, type_t::s64));
+    EXPECT_FALSE(valid(type_t::s32, type_t::s32));
+    EXPECT_FALSE(valid(type_t::bf16, type_t::s16));
 }
 
 /// narrow emits the float conversions and the saturating integer clips
@@ -333,7 +301,7 @@ TEST(narrow_emission, valid_instructions) {
         const auto vd = VReg(8), vs = VReg(16);
 
         const auto emit = [&](type_t dst, type_t src, name_t d, name_t s) {
-            ar.narrow(arithmetic::op_t::convert(dst, src, vec).names(d, s));
+            ar.narrow(arithmetic::op_t::convert(dst, src, vec))(d, s);
         };
         emit(type_t::f32, type_t::f64, 8, 16);
         gen.vfncvt_f_f_w(vd, vs);
@@ -369,7 +337,7 @@ TEST(widen_emission, valid_instructions) {
         const auto vd = VReg(8), vs = VReg(16);
 
         const auto emit = [&](type_t dst, type_t src) {
-            ar.widen(arithmetic::op_t::convert(dst, src, vec).names(8, 16));
+            ar.widen(arithmetic::op_t::convert(dst, src, vec))(8, 16);
         };
         emit(type_t::f32, type_t::f16);
         gen.vfwcvt_f_f_v(vd, vs);
@@ -403,28 +371,28 @@ TEST(narrow_widen_supports, shapes) {
         return op_t::convert(dst, src, vec);
     };
 
-    EXPECT_TRUE(ar.supports_narrow(conv(type_t::f16, type_t::f32)));
-    EXPECT_TRUE(ar.supports_narrow(conv(type_t::s8, type_t::s16)));
-    EXPECT_TRUE(ar.supports_narrow(conv(type_t::u8, type_t::u16)));
-    EXPECT_FALSE(ar.supports_narrow(conv(type_t::f32, type_t::f32)));
-    EXPECT_FALSE(ar.supports_narrow(conv(type_t::f16, type_t::f64)));
-    EXPECT_FALSE(ar.supports_narrow(conv(type_t::s8, type_t::s32)));
-    EXPECT_FALSE(ar.supports_narrow(conv(type_t::s16, type_t::f32)));
-    EXPECT_FALSE(ar.supports_narrow(conv(type_t::u16, type_t::s32)));
-    EXPECT_FALSE(ar.supports_narrow(conv(type_t::f32, type_t::f16)));
-    EXPECT_FALSE(ar.supports_narrow(op_t::uniform(type_t::f32, vec)));
+    EXPECT_TRUE(ar.narrow(conv(type_t::f16, type_t::f32)).is_valid());
+    EXPECT_TRUE(ar.narrow(conv(type_t::s8, type_t::s16)).is_valid());
+    EXPECT_TRUE(ar.narrow(conv(type_t::u8, type_t::u16)).is_valid());
+    EXPECT_FALSE(ar.narrow(conv(type_t::f32, type_t::f32)).is_valid());
+    EXPECT_FALSE(ar.narrow(conv(type_t::f16, type_t::f64)).is_valid());
+    EXPECT_FALSE(ar.narrow(conv(type_t::s8, type_t::s32)).is_valid());
+    EXPECT_FALSE(ar.narrow(conv(type_t::s16, type_t::f32)).is_valid());
+    EXPECT_FALSE(ar.narrow(conv(type_t::u16, type_t::s32)).is_valid());
+    EXPECT_FALSE(ar.narrow(conv(type_t::f32, type_t::f16)).is_valid());
+    EXPECT_FALSE(ar.narrow(op_t::uniform(type_t::f32, vec)).is_valid());
     {
         const auto op = op_t::convert(type_t::f16, type_t::f32, form_t::scalar);
-        EXPECT_FALSE(ar.supports_narrow(op));
+        EXPECT_FALSE(ar.narrow(op).is_valid());
     }
 
-    EXPECT_TRUE(ar.supports_widen(conv(type_t::f32, type_t::f16)));
-    EXPECT_TRUE(ar.supports_widen(conv(type_t::s16, type_t::s8)));
-    EXPECT_TRUE(ar.supports_widen(conv(type_t::s32, type_t::u16)));
-    EXPECT_FALSE(ar.supports_widen(conv(type_t::f64, type_t::f16)));
-    EXPECT_FALSE(ar.supports_widen(conv(type_t::u16, type_t::s8)));
-    EXPECT_FALSE(ar.supports_widen(conv(type_t::s16, type_t::f16)));
-    EXPECT_FALSE(ar.supports_widen(conv(type_t::f16, type_t::f32)));
+    EXPECT_TRUE(ar.widen(conv(type_t::f32, type_t::f16)).is_valid());
+    EXPECT_TRUE(ar.widen(conv(type_t::s16, type_t::s8)).is_valid());
+    EXPECT_TRUE(ar.widen(conv(type_t::s32, type_t::u16)).is_valid());
+    EXPECT_FALSE(ar.widen(conv(type_t::f64, type_t::f16)).is_valid());
+    EXPECT_FALSE(ar.widen(conv(type_t::u16, type_t::s8)).is_valid());
+    EXPECT_FALSE(ar.widen(conv(type_t::s16, type_t::f16)).is_valid());
+    EXPECT_FALSE(ar.widen(conv(type_t::f16, type_t::f32)).is_valid());
 }
 
 /// extend emits the 2x, 4x and 8x sign or zero extensions
@@ -438,7 +406,7 @@ TEST(extend_emission, valid_instructions) {
         const auto vd = VReg(8), vs = VReg(16);
 
         const auto emit = [&](type_t dst, type_t src) {
-            ar.extend(arithmetic::op_t::convert(dst, src, vec).names(8, 16));
+            ar.extend(arithmetic::op_t::convert(dst, src, vec))(8, 16);
         };
         emit(type_t::s16, type_t::s8);
         gen.vsext_vf2(vd, vs);
@@ -471,7 +439,7 @@ TEST(convert_emission, valid_instructions) {
         const auto vd = VReg(8), vs = VReg(16);
 
         const auto emit = [&](type_t dst, type_t src, rvjit::form_t f) {
-            ar.convert(arithmetic::op_t::convert(dst, src, f).names(8, 16));
+            ar.convert(arithmetic::op_t::convert(dst, src, f))(8, 16);
         };
         emit(type_t::f32, type_t::s32, vec);
         gen.vfcvt_f_x_v(vd, vs);
@@ -509,43 +477,63 @@ TEST(extend_convert_supports, shapes) {
         return op_t::convert(dst, src, vec);
     };
 
-    EXPECT_TRUE(ar.supports_extend(conv(type_t::s32, type_t::s8)));
-    EXPECT_TRUE(ar.supports_extend(conv(type_t::s64, type_t::u8)));
-    EXPECT_FALSE(ar.supports_extend(conv(type_t::u16, type_t::s8)));
-    EXPECT_FALSE(ar.supports_extend(conv(type_t::s8, type_t::s8)));
-    EXPECT_FALSE(ar.supports_extend(conv(type_t::f32, type_t::f16)));
+    EXPECT_TRUE(ar.extend(conv(type_t::s32, type_t::s8)).is_valid());
+    EXPECT_TRUE(ar.extend(conv(type_t::s64, type_t::u8)).is_valid());
+    EXPECT_FALSE(ar.extend(conv(type_t::u16, type_t::s8)).is_valid());
+    EXPECT_FALSE(ar.extend(conv(type_t::s8, type_t::s8)).is_valid());
+    EXPECT_FALSE(ar.extend(conv(type_t::f32, type_t::f16)).is_valid());
     EXPECT_FALSE(
-            ar.supports_extend(op_t::convert(type_t::s32, type_t::s8, sca)));
+            ar.extend(op_t::convert(type_t::s32, type_t::s8, sca)).is_valid());
 
-    EXPECT_TRUE(ar.supports_convert(conv(type_t::f32, type_t::s32)));
-    EXPECT_TRUE(ar.supports_convert(conv(type_t::s16, type_t::f16)));
-    EXPECT_FALSE(ar.supports_convert(conv(type_t::f32, type_t::s16)));
-    EXPECT_FALSE(ar.supports_convert(conv(type_t::bf16, type_t::s16)));
-    EXPECT_FALSE(ar.supports_convert(conv(type_t::f32, type_t::f32)));
-    EXPECT_TRUE(
-            ar.supports_convert(op_t::convert(type_t::f32, type_t::s64, sca)));
-    EXPECT_FALSE(
-            ar.supports_convert(op_t::convert(type_t::f32, type_t::s16, sca)));
+    EXPECT_TRUE(ar.convert(conv(type_t::f32, type_t::s32)).is_valid());
+    EXPECT_TRUE(ar.convert(conv(type_t::s16, type_t::f16)).is_valid());
+    EXPECT_FALSE(ar.convert(conv(type_t::f32, type_t::s16)).is_valid());
+    EXPECT_FALSE(ar.convert(conv(type_t::bf16, type_t::s16)).is_valid());
+    EXPECT_FALSE(ar.convert(conv(type_t::f32, type_t::f32)).is_valid());
+    EXPECT_TRUE(ar.convert(op_t::convert(type_t::f32, type_t::s64, sca))
+                        .is_valid());
+    EXPECT_FALSE(ar.convert(op_t::convert(type_t::f32, type_t::s16, sca))
+                         .is_valid());
 }
 
-/// names() renames the leading registers and leaves the other operands alone
-TEST(arithmetic_op, names_overrides_the_leading_registers) {
-    auto op = arithmetic::op_t::uniform(type_t::f32, form_t::vector);
-    op.rd.name = 1;
-    op.rs1.name = 2;
-    op.rs2.name = 3;
+/// One expression emits on any registers, each call naming them
+TEST(arithmetic_expression, emits_on_the_registers_of_each_call) {
+    static constexpr int n_pairs = 3;
 
-    const auto d = op.names(7);
-    EXPECT_EQ(d.rd.name, 7);
-    EXPECT_EQ(d.rs1.name, 2);
+    rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
+        env_t env(gen);
+        rvv::arithmetic::arithmetic_t ar(env.e);
+        const auto fma = ar.macc(rvjit::form_t::vector, type_t::f32);
+        fma(8, 16, 24);
+        gen.vfmacc_vv(VReg(8), VReg(16), VReg(24));
+        fma(1, 2, 3);
+        gen.vfmacc_vv(VReg(1), VReg(2), VReg(3));
+        const auto fma_vf = ar.macc({rvjit::form_t::vector, type_t::f32},
+                {rvjit::form_t::scalar, type_t::f32},
+                {rvjit::form_t::vector, type_t::f32});
+        fma_vf(8, 10, 24);
+        gen.vfmacc_vf(VReg(8), FReg(10), VReg(24));
 
-    const auto ds = op.names(7, 8);
-    EXPECT_EQ(ds.rs1.name, 8);
-    EXPECT_EQ(ds.rs2.name, 3);
+        gen.ret();
+    });
+    ASSERT_TRUE(kernel.create_kernel());
+    expect_matching_pairs(kernel, n_pairs);
+}
 
-    const auto all = op.names(7, 8, 9);
-    EXPECT_EQ(all.rs2.name, 9);
-    EXPECT_EQ(op.rd.name, 1);
+/// An unbound expression is never valid and emits nothing
+TEST(arithmetic_expression, unbound_is_invalid) {
+    const arithmetic::expression_t none;
+    EXPECT_FALSE(none.is_valid());
+}
+
+/// RVV zero clears vectors, and scalars through RV64
+TEST(zero_valid, vectors_and_scalars) {
+    Xbyak_riscv::CodeGenerator gen;
+    env_t env(gen);
+    rvv::arithmetic::arithmetic_t ar(env.e);
+    EXPECT_TRUE(ar.zero(rvjit::form_t::vector, type_t::f32).is_valid());
+    EXPECT_TRUE(ar.zero(rvjit::form_t::scalar, type_t::s32).is_valid());
+    EXPECT_FALSE(ar.zero(rvjit::form_t::undefined, type_t::s32).is_valid());
 }
 
 } // namespace rvjit

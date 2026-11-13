@@ -63,13 +63,16 @@ struct memory_operand_impl_t : public stream_impl_t {
     /// and a ring
     ///
     /// @param op The memory operation shared by every position
+    /// @param args The register holding the stride or the offsets of a
+    ///     strided or indexed `op`, `no_name` otherwise
     /// @param walk The resolved pointer walk
     /// @param ring The destination register ring
-    bool init(const memory::op_t &op, const iterator::plan_t &walk,
+    bool init(const memory::op_t &op, name_t args, const iterator::plan_t &walk,
             const buffer_map_t &ring) {
         CHECK(ring.is_valid(), "invalid register ring");
         CHECK(it_.init(walk), "unresolved iterator plan");
-        op_ = op;
+        x_ = mem_->of(op);
+        args_ = args;
         regs_ = ring;
         return true;
     }
@@ -78,7 +81,7 @@ struct memory_operand_impl_t : public stream_impl_t {
     buffer_map_t &regs() { return regs_; }
 
     /// The memory operation shared by every position
-    const memory::op_t &op() const { return op_; }
+    const memory::op_t &op() const { return x_; }
 
     /// Re-resolves the stream with another variant of the spec it was
     /// created from
@@ -119,10 +122,7 @@ struct memory_operand_impl_t : public stream_impl_t {
 protected:
     /// Emits the memory operation at `idx`, then advances the pointer
     void produce_(const index_t &idx) override {
-        memory::op_t op = op_;
-        op.data.name = regs_({idx[0], idx[1]});
-        op.addr = it_.pointer(idx);
-        op.dir == memory::dir_t::load ? mem_->load(op) : mem_->store(op);
+        x_(regs_({idx[0], idx[1]}), it_.pointer(idx), args_);
         it_.iteration(idx);
     }
 
@@ -134,7 +134,8 @@ private:
 
     const operation::memory_t *mem_ = nullptr;
     iterator::iterator_impl_t it_;
-    memory::op_t op_;
+    memory::expression_t x_; // The load or store of every position
+    name_t args_ = no_name;
     buffer_map_t regs_;
     spec_t spec_;
     memory_operand_t *owner_ = nullptr;
@@ -256,7 +257,7 @@ private:
         ptr_.new_iterator(walk);
         CHECK(!walk.needs_regs(), "insufficient registers for the pointers");
 
-        CHECK(m.init(spec.op, walk, ring),
+        CHECK(m.init(spec.op, spec.args, walk, ring),
                 "unable to create the memory operand");
         m.spec_ = spec;
         miss_ = {};

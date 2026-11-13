@@ -115,12 +115,9 @@ struct matmul_t {
         const int kg = impl_.k_grain;
 
         // Configure the multiply-accumulate operation from the operand forms
-        macc_ = arithmetic::op_t(p.dtc.reg, p.dtb.reg, p.dta.reg);
-        macc_.rd.form = impl_.c_form;
-        macc_.rs1.form = impl_.b_form;
-        macc_.rs2.form = impl_.a_form;
-        CHECK(pm_.isa().arithmetic().supports_macc(macc_),
-                "invalid macc operation");
+        macc_ = pm_.isa().arithmetic().macc({impl_.c_form, p.dtc.reg},
+                {impl_.b_form, p.dtb.reg}, {impl_.a_form, p.dta.reg});
+        CHECK(macc_.is_valid(), "invalid macc operation");
         CHECK(!p.dta.converts() || p.dta.widens(), "a narrowed A");
 
         // B is extended to a wider integer by its load: the narrow load
@@ -521,7 +518,7 @@ struct matmul_t {
                         const auto rd = C.get({m, n});
                         const auto rs1 = B.get({k, n});
                         const auto rs2 = A.get({k, m});
-                        pm_.isa().arithmetic().macc(macc_.names(rd, rs1, rs2));
+                        macc_(rd, rs1, rs2);
                     }, [&] { impl_.on_k_loop_enter(mb, nb, k.remaining()); });
 
                     impl_.on_k_loop_exit(mb, nb, k.remaining());
@@ -604,7 +601,7 @@ private:
     loop::frame_t k_phase_; // Saves variables around the K phase, if needed
 
     // Operations and operands
-    arithmetic::op_t macc_;
+    arithmetic::expression_t macc_;
     memory_stream_t *a_stream_ = memory_stream_t::invalid();
     stream::memory_operand::input_stream_t a_in_; // A converted, if narrower
     int a_offset_ = 0;

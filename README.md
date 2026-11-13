@@ -143,27 +143,32 @@ pm.stack.restore();  // before ret()
 ### Memory
 
 Loads and stores described by type and form (scalar or vector; unit-stride,
-strided or indexed). The backend picks the instruction. Interface:
+strided or indexed). The dialect creates an expression from the operation's
+form and type, and the expression is called with the data register and the
+address, plus the stride or index register of a strided or indexed access.
+The backend picks the instruction. Interface:
 [`memory.hpp`](rvjit/interface/isa/operation/memory.hpp).
 
 ```cpp
-memory::op_t vload = memory::op_t().vector().load().as_type(type_t::f32);
-vload.data.name = reg_name(v8);
-vload.addr = pointer_t(a0, 0);
-pm.isa().memory().load(vload); // vle32.v v8, (a0)
+const auto vload = pm.isa().memory().load(form_t::vector, type_t::f32);
+vload(reg_name(v8), pointer_t(a0, 0)); // vle32.v v8, (a0)
 ```
 
 ### Arithmetic
 
-Multiply-accumulate, add, mul, zero, widen, narrow, extend and convert,
-described by operand types and forms. `supports_*` tells whether the target
-can emit an operation. Interface:
+Multiply-accumulate, add, mul, zero, bitcast, widen, narrow, extend and
+convert, each an expression created from its operands' forms and types and
+called with their registers; one expression emits any number of times.
+`is_valid` tells whether the target can emit it. Interface:
 [`arithmetic.hpp`](rvjit/interface/isa/operation/arithmetic.hpp).
 
 ```cpp
-const auto fma = arithmetic::op_t::uniform(type_t::f32, form_t::vector)
-                         .names(reg_name(v16), reg_name(v8), reg_name(v12));
-pm.isa().arithmetic().macc(fma); // vfmacc.vv v16, v8, v12
+const auto fma = pm.isa().arithmetic().macc(form_t::vector, type_t::f32);
+fma(reg_name(v16), reg_name(v8), reg_name(v12)); // vfmacc.vv v16, v8, v12
+
+const auto fma_vf = pm.isa().arithmetic().macc({form_t::vector, type_t::f32},
+        {form_t::scalar, type_t::f32}, {form_t::vector, type_t::f32});
+fma_vf(reg_name(v16), reg_name(fa0), reg_name(v12)); // vfmacc.vf v16, fa0, v12
 ```
 
 ### Loops

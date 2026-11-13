@@ -139,10 +139,7 @@ int main(int argc, char **argv) {
                 for (int i1 = 0; i1 < cfg_.shape[1]; ++i1) {
                     const index_t idx {i0, i1};
                     mo->iteration(idx); // emits the load, then advances
-                    memory::op_t store_op = st;
-                    store_op.data.name = mo->get(idx);
-                    store_op.addr = pointer_t(results_ptr);
-                    mem.store(store_op);
+                    mem.store(st)(mo->get(idx), pointer_t(results_ptr));
                     addi(results_ptr, results_ptr, width);
                 }
             }

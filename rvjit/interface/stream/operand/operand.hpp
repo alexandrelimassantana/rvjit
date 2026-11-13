@@ -36,7 +36,7 @@ struct operand_impl_t : public stream_impl_t {
     /// Creates an unconfigured operand
     ///
     /// @param arith The arithmetic operations that zero an accumulator
-    explicit operand_impl_t(operation::arithmetic_t *arith = nullptr)
+    explicit operand_impl_t(const operation::arithmetic_t *arith = nullptr)
         : arith_(arith) {}
 
     /// The stream handed out in place of one that failed to be created
@@ -53,8 +53,9 @@ struct operand_impl_t : public stream_impl_t {
     bool init(const buffer_map_t &block, const rvjit::operand_t &traits,
             bool zero) {
         block_ = block;
-        traits_ = traits;
         zero_ = zero;
+        zero_x_ = arith_ ? arith_->zero(traits.form, traits.type)
+                         : arithmetic::expression_t();
         return true;
     }
 
@@ -89,16 +90,13 @@ protected:
     void produce_(const index_t &) override {}
 
     void init_(const index_t &idx) override {
-        if (!zero_ || !arith_) return;
-        arithmetic::op_t op(traits_);
-        op.rd.name = block_({idx[0], idx[1]});
-        arith_->zero(op);
+        if (zero_ && zero_x_.is_valid()) zero_x_(block_({idx[0], idx[1]}));
     }
 
 private:
-    operation::arithmetic_t *arith_;
+    const operation::arithmetic_t *arith_;
     buffer_map_t block_;
-    rvjit::operand_t traits_;
+    arithmetic::expression_t zero_x_; // Zeroes a register of the traits
     bool zero_ = false;
 };
 
@@ -111,12 +109,12 @@ struct operand_t : public stream_table_t<operand_impl_t, 8> {
     /// Creates a factory whose accumulators cannot zero themselves
     operand_t()
         : stream_table_t<operand_impl_t, 8>(
-                  static_cast<operation::arithmetic_t *>(nullptr)) {}
+                  static_cast<const operation::arithmetic_t *>(nullptr)) {}
 
     /// Creates a factory
     ///
     /// @param arith The arithmetic operations that zero an accumulator
-    explicit operand_t(operation::arithmetic_t &arith)
+    explicit operand_t(const operation::arithmetic_t &arith)
         : stream_table_t<operand_impl_t, 8>(&arith) {}
 
     /// Creates a plain register view without an associated code stream

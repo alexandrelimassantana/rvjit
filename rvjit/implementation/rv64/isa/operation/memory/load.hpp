@@ -29,7 +29,7 @@ namespace rv64 {
 namespace memory {
 
 /// Scalar load expression
-struct load_t {
+struct load_t : public rvjit::memory::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rv64::memory";
 
     /// Creates the component
@@ -40,7 +40,7 @@ struct load_t {
     /// Whether `op.data` has a scalar load width
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::memory::op_t &op) const {
+    bool is_valid(const rvjit::memory::op_t &op) const override {
         if (!op.data.is_defined()) return false;
         const int w = op.data.width;
         return op.data.is_int() ? (w == 1 || w == 2 || w == 4 || w == 8)
@@ -50,17 +50,19 @@ struct load_t {
     /// General scalar memory load
     ///
     /// @param op The operation, in the scalar form
+    /// @param args The data register and the address
     ///
     /// @details Emits an integer or float load based on `op.data`
-    bool operator()(const rvjit::memory::op_t &op) const {
-        CHECK(op.data.is_valid(), "invalid operand descriptor");
-        CHECK(supports(op), "unsupported datatype width");
+    void emit(const rvjit::memory::op_t &op,
+            const rvjit::memory::args_t &args) const override {
+        CHECK_OR_RET(op.data.is_valid() && args.data != no_name, ,
+                "invalid operand descriptor");
+        CHECK_OR_RET(load_t::is_valid(op), , "unsupported datatype width");
         if (op.data.is_int())
-            xload(reg_t(op.data.name), op.addr, op.data.width,
+            xload(reg_t(args.data), args.addr, op.data.width,
                     op.data.is_signed());
         else
-            fload(freg_t(op.data.name), op.addr, op.data.width);
-        return true;
+            fload(freg_t(args.data), args.addr, op.data.width);
     }
 
     /// General scalar float load

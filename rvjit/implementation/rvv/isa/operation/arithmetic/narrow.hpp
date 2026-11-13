@@ -41,7 +41,7 @@ namespace arithmetic {
 /// @pre `rd` is `rs1` or does not overlap the source group, which is twice
 ///     as long as the destination's: in place, the destination takes the
 ///     lowest-numbered part of the source
-struct narrow_t {
+struct narrow_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rvv::arithmetic";
 
     /// Creates the component
@@ -52,26 +52,27 @@ struct narrow_t {
     /// Whether `op` maps to a supported instruction
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         return select_(op) != sel_t::none;
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_binary(), "expected a binary operand descriptor");
-        CHECK(all_valid(op.rd, op.rs1), "invalid operand descriptor");
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(op.is_binary(), , "expected a binary operand descriptor");
+        CHECK_OR_RET(all_valid(op.rd, op.rs1) && args.named(2), ,
+                "invalid operand descriptor");
         const sel_t sel = select_(op);
-        CHECK(sel != sel_t::none, "invalid descriptor");
+        CHECK_OR_RET(sel != sel_t::none, , "invalid descriptor");
 
-        const VReg vd(op.rd.name), vs2(op.rs1.name);
+        const VReg vd(args.rd), vs2(args.rs1);
         const VM vm = rv64::isa_traits_base_t::vm(op.predicate);
         switch (sel) {
             case sel_t::vfncvt: e_->vfncvt_f_f_w(vd, vs2, vm); break;
             case sel_t::vfncvtbf16: e_->vfncvtbf16_f_f_w(vd, vs2, vm); break;
             case sel_t::vnclip: e_->vnclip_wi(vd, vs2, 0, vm); break;
             case sel_t::vnclipu: e_->vnclipu_wi(vd, vs2, 0, vm); break;
-            default: return false;
+            default: return;
         }
-        return true;
     }
 
 private:

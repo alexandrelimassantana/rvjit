@@ -18,6 +18,7 @@
 #define RVJIT_INTERFACE_ISA_OPERATION_MEMORY_HPP
 
 #include "rvjit/interface/isa/operand.hpp"
+#include "rvjit/interface/isa/operation/expression.hpp"
 #include "rvjit/interface/isa/pointer.hpp"
 #include "rvjit/interface/isa/register.hpp"
 #include "rvjit/interface/isa/types.hpp"
@@ -39,13 +40,15 @@ enum class vec_addr_t {
 };
 
 /// Generic memory operation description
+///
+/// @details Describes the data's form and type and the addressing mode; the
+///     data register, the address and the stride or index register are the
+///     arguments of the expression emitting it (`args_t`)
 struct op_t : public typed_t {
     using operand_t = rvjit::operand_t;
 
     operand_t data;
-    pointer_t addr;
     dir_t dir = dir_t::load;
-    name_t args = no_name;
     vec_addr_t vector_mode = vec_addr_t::unit;
     predicate_t predicate = predicate_t::unmasked;
 
@@ -102,18 +105,16 @@ struct op_t : public typed_t {
 
     /// Sets the vector addressing to a register-held byte stride
     ///
-    /// @param stride_reg The register holding the stride
-    op_t &strided(const reg_t &stride_reg) {
-        args = reg_name(stride_reg);
+    /// @note The expression is called with the register holding the stride
+    op_t &strided() {
         vector_mode = vec_addr_t::stride;
         return *this;
     }
 
     /// Sets the vector addressing to the byte offsets of a vector register
     ///
-    /// @param index_reg The vector register holding the offsets
-    op_t &indexed(const vreg_t &index_reg) {
-        args = reg_name(index_reg);
+    /// @note The expression is called with the register holding the offsets
+    op_t &indexed() {
         vector_mode = vec_addr_t::index;
         return *this;
     }
@@ -139,6 +140,25 @@ struct op_t : public typed_t {
     }
 };
 
+/// The registers a memory expression is emitted on
+struct args_t {
+    name_t data;
+    pointer_t addr;
+    name_t args;
+
+    /// Names the data register, the address and the addressing register
+    ///
+    /// @param data The register loaded or stored
+    /// @param addr The memory address
+    /// @param args The register holding the stride of a strided access or the
+    ///     offsets of an indexed one, `no_name` otherwise
+    args_t(name_t data, const pointer_t &addr, name_t args = no_name)
+        : data(data), addr(addr), args(args) {}
+};
+
+using expression_t = operation::expression_t<op_t, args_t>;
+using expression_impl_t = operation::expression_impl_t<op_t, args_t>;
+
 } // namespace memory
 } // namespace rvjit
 
@@ -146,80 +166,104 @@ namespace rvjit {
 namespace operation {
 
 /// Memory expressions
+///
+/// @details A factory of `memory::expression_t`: each method binds an
+///     operation to the ISA logic of its direction, and the expression is
+///     then called with the registers, e.g. `load(form, dt)(data, addr)`
+///
+/// @note An implementation overrides the protected accessors of the
+///     directions it implements; the others are never valid
 struct memory_t {
     static constexpr const char *NAME = "rvjit::operation::memory";
 
     virtual ~memory_t() = default;
 
-    /// Whether `load` can emit `op`, ignoring the operand's register name
+    /// Load expression, loading `addr` into `data`
     ///
-    /// @param op The operation checked
-    virtual bool supports_load(const memory::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// @param op The operation, whose direction becomes load
+    memory::expression_t load(const memory::op_t &op) const {
+        memory::op_t o = op;
+        return memory::expression_t(load_(), o.load());
     }
 
-    /// Whether `store` can emit `op`, ignoring the operand's register name
+    /// Load expression of a data form and type
     ///
-    /// @param op The operation checked
-    virtual bool supports_store(const memory::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// @param form The storage category of the data
+    /// @param dt The data type
+    /// @param mode The vector addressing mode
+    memory::expression_t load(form_t form, type_t dt,
+            memory::vec_addr_t mode = memory::vec_addr_t::unit) const {
+        memory::op_t o = memory::op_t::load(form, dt);
+        o.vector_mode = mode;
+        return load(o);
     }
 
-    /// Loads data from memory and stores into a buffer
+    /// Store expression, storing `data` into `addr`
     ///
-    /// @param op The operation, loading `addr` into `data`
-    ///
-    /// @note Returns false when the expression fails to emit code
-    ///
-    /// @pre Caller must supply operand combinations supported by the ISA
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    virtual bool load(const memory::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// @param op The operation, whose direction becomes store
+    memory::expression_t store(const memory::op_t &op) const {
+        memory::op_t o = op;
+        return memory::expression_t(store_(), o.store());
     }
 
-    /// Stores data from a buffer into memory
+    /// Store expression of a data form and type
     ///
-    /// @param op The operation, storing `data` into `addr`
+    /// @param form The storage category of the data
+    /// @param dt The data type
+    /// @param mode The vector addressing mode
+    memory::expression_t store(form_t form, type_t dt,
+            memory::vec_addr_t mode = memory::vec_addr_t::unit) const {
+        memory::op_t o = memory::op_t::store(form, dt);
+        o.vector_mode = mode;
+        return store(o);
+    }
+
+    /// The load or store expression of `op`, as its direction says
     ///
-    /// @note Returns false when the expression fails to emit code
-    ///
-    /// @pre Caller must supply operand combinations supported by the ISA
-    /// @pre On vector forms, the caller must manage the ISA state (e.g. vtype)
-    virtual bool store(const memory::op_t &op) const {
-        (void)op;
-        LOG_FAIL(__func__, "unimplemented");
-        return false;
+    /// @param op The operation
+    memory::expression_t of(const memory::op_t &op) const {
+        return op.dir == memory::dir_t::load ? load(op) : store(op);
+    }
+
+protected:
+    /// The logic of `load`
+    virtual const memory::expression_impl_t &load_() const {
+        return unimplemented_();
+    }
+
+    /// The logic of `store`
+    virtual const memory::expression_impl_t &store_() const {
+        return unimplemented_();
+    }
+
+private:
+    static const memory::expression_impl_t &unimplemented_() {
+        static const memory::expression_impl_t none;
+        return none;
     }
 };
 
 /// Assembles a `memory_t` from expression implementations
 ///
-/// @details The expression must be constructible from `emitter_t`
+/// @details Each implementation derives from `memory::expression_impl_t` and
+///     is constructible from `emitter_t`
 template <typename LoadOp, typename StoreOp>
 struct memory_compose_t : public memory_t {
     /// Constructs every expression implementation
     ///
     /// @param e The emitter the expressions emit through
-    explicit memory_compose_t(emitter_t e) : load_(e), store_(e) {}
-
-    bool supports_load(const memory::op_t &op) const override {
-        return load_.supports(op);
-    }
-    bool supports_store(const memory::op_t &op) const override {
-        return store_.supports(op);
-    }
-    bool load(const memory::op_t &op) const override { return load_(op); }
-    bool store(const memory::op_t &op) const override { return store_(op); }
+    explicit memory_compose_t(emitter_t e) : load_impl_(e), store_impl_(e) {}
 
 protected:
-    LoadOp load_;
-    StoreOp store_;
+    const memory::expression_impl_t &load_() const override {
+        return load_impl_;
+    }
+    const memory::expression_impl_t &store_() const override {
+        return store_impl_;
+    }
+
+    LoadOp load_impl_;
+    StoreOp store_impl_;
 };
 
 } // namespace operation

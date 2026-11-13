@@ -37,7 +37,7 @@ namespace arithmetic {
 ///
 /// @pre On vector forms, the caller must issue `vsetvli` prior to calling this
 ///     expression with the operands' SEW and LMUL
-struct convert_t {
+struct convert_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rvv::arithmetic";
 
     /// Creates the component
@@ -48,7 +48,7 @@ struct convert_t {
     /// Whether `op` maps to a supported instruction
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         if (!op.is_converting() || !op.rd.has_valid_width()
                 || !op.rs1.has_valid_width())
             return false;
@@ -59,12 +59,16 @@ struct convert_t {
         return false;
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_binary(), "expected a binary operand descriptor");
-        CHECK(all_valid(op.rd, op.rs1), "invalid operand descriptor");
-        CHECK(supports(op), "invalid descriptor");
-        if (op.rd.is_vector()) return vector_(op);
-        return scalar_(op);
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(op.is_binary(), , "expected a binary operand descriptor");
+        CHECK_OR_RET(all_valid(op.rd, op.rs1) && args.named(2), ,
+                "invalid operand descriptor");
+        CHECK_OR_RET(is_valid(op), , "invalid descriptor");
+        if (op.rd.is_vector())
+            vector_(op, args);
+        else
+            scalar_(op, args);
     }
 
 private:
@@ -81,8 +85,9 @@ private:
         return op.rd.is_int() ? op.rd.width : op.rs1.width;
     }
 
-    bool vector_(const rvjit::arithmetic::op_t &op) const {
-        const VReg vd(op.rd.name), vs2(op.rs1.name);
+    void vector_(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const {
+        const VReg vd(args.rd), vs2(args.rs1);
         const VM vm = rv64::isa_traits_base_t::vm(op.predicate);
         if (op.rd.is_float()) {
             if (op.rs1.is_signed())
@@ -95,18 +100,18 @@ private:
             else
                 e_->vfcvt_xu_f_v(vd, vs2, vm);
         }
-        return true;
     }
 
     // The unsigned scalar integer is u32: rvjit has no u64
-    bool scalar_(const rvjit::arithmetic::op_t &op) const {
+    void scalar_(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const {
         const bool to_float = op.rd.is_float();
         const int fw = to_float ? op.rd.width : op.rs1.width;
         const bool wide = int_width_(op) == 8;
         const bool sgn = to_float ? op.rs1.is_signed() : op.rd.is_signed();
         if (to_float) {
-            const FReg fd(op.rd.name);
-            const Reg rs(op.rs1.name);
+            const FReg fd(args.rd);
+            const Reg rs(args.rs1);
             if (fw == 2)
                 wide ? e_->fcvt_h_l(fd, rs)
                      : (sgn ? e_->fcvt_h_w(fd, rs) : e_->fcvt_h_wu(fd, rs));
@@ -116,10 +121,10 @@ private:
             else
                 wide ? e_->fcvt_d_l(fd, rs)
                      : (sgn ? e_->fcvt_d_w(fd, rs) : e_->fcvt_d_wu(fd, rs));
-            return true;
+            return;
         }
-        const Reg rd(op.rd.name);
-        const FReg fs(op.rs1.name);
+        const Reg rd(args.rd);
+        const FReg fs(args.rs1);
         if (fw == 2)
             wide ? e_->fcvt_l_h(rd, fs)
                  : (sgn ? e_->fcvt_w_h(rd, fs) : e_->fcvt_wu_h(rd, fs));
@@ -129,7 +134,6 @@ private:
         else
             wide ? e_->fcvt_l_d(rd, fs)
                  : (sgn ? e_->fcvt_w_d(rd, fs) : e_->fcvt_wu_d(rd, fs));
-        return true;
     }
 };
 

@@ -37,7 +37,7 @@ namespace arithmetic {
 ///     the `vtype` must be configured using the destination's SEW and LMUL
 /// @pre The source group is the highest-numbered part of the destination
 ///     group, or does not overlap it
-struct extend_t {
+struct extend_t : public rvjit::arithmetic::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rvv::arithmetic";
 
     /// Creates the component
@@ -48,17 +48,19 @@ struct extend_t {
     /// Whether `op` maps to a supported instruction
     ///
     /// @param op The operation checked
-    bool supports(const rvjit::arithmetic::op_t &op) const {
+    bool is_valid(const rvjit::arithmetic::op_t &op) const override {
         return select_(op) != 0;
     }
 
-    bool operator()(const rvjit::arithmetic::op_t &op) const {
-        CHECK(op.is_binary(), "expected a binary operand descriptor");
-        CHECK(all_valid(op.rd, op.rs1), "invalid operand descriptor");
+    void emit(const rvjit::arithmetic::op_t &op,
+            const rvjit::arithmetic::args_t &args) const override {
+        CHECK_OR_RET(op.is_binary(), , "expected a binary operand descriptor");
+        CHECK_OR_RET(all_valid(op.rd, op.rs1) && args.named(2), ,
+                "invalid operand descriptor");
         const int sel = select_(op);
-        CHECK(sel != 0, "invalid descriptor");
+        CHECK_OR_RET(sel != 0, , "invalid descriptor");
 
-        const VReg vd(op.rd.name), vs2(op.rs1.name);
+        const VReg vd(args.rd), vs2(args.rs1);
         const VM vm = rv64::isa_traits_base_t::vm(op.predicate);
         switch (sel) {
             case 2: e_->vsext_vf2(vd, vs2, vm); break;
@@ -67,9 +69,8 @@ struct extend_t {
             case -2: e_->vzext_vf2(vd, vs2, vm); break;
             case -4: e_->vzext_vf4(vd, vs2, vm); break;
             case -8: e_->vzext_vf8(vd, vs2, vm); break;
-            default: return false;
+            default: return;
         }
-        return true;
     }
 
 private:

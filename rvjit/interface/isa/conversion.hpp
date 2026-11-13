@@ -140,14 +140,27 @@ struct conversion_t {
         return a > b ? a / b : b / a;
     }
 
-    /// The operation of step `i`, with the registers `dst` and `src`
+    /// The operation of step `i`
     ///
     /// @param i The step's index
-    /// @param dst The destination register
-    /// @param src The source register
-    arithmetic::op_t op(int i, name_t dst, name_t src) const {
+    arithmetic::op_t op(int i) const {
         const conversion::step_t &s = steps_[i];
-        return arithmetic::op_t::convert(s.to, s.from, form_).names(dst, src);
+        return arithmetic::op_t::convert(s.to, s.from, form_);
+    }
+
+    /// The expression of step `i`, emitted on its destination and source
+    ///
+    /// @param i The step's index
+    /// @param arith The dialect the expression is created by
+    arithmetic::expression_t expression(
+            int i, const operation::arithmetic_t &arith) const {
+        const arithmetic::op_t o = op(i);
+        switch (steps_[i].kind) {
+            case conversion::kind_t::extend: return arith.extend(o);
+            case conversion::kind_t::widen: return arith.widen(o);
+            case conversion::kind_t::convert: return arith.convert(o);
+            default: return arith.narrow(o);
+        }
     }
 
 private:
@@ -233,23 +246,8 @@ private:
     }
 
     bool supported_(const operation::arithmetic_t &arith) const {
-        for (int i = 0; i < n_; ++i) {
-            const arithmetic::op_t o = op(i, 0, 0);
-            bool ok = false;
-            switch (steps_[i].kind) {
-                case conversion::kind_t::extend:
-                    ok = arith.supports_extend(o);
-                    break;
-                case conversion::kind_t::widen:
-                    ok = arith.supports_widen(o);
-                    break;
-                case conversion::kind_t::convert:
-                    ok = arith.supports_convert(o);
-                    break;
-                default: ok = arith.supports_narrow(o); break;
-            }
-            CHECK(ok, "an unsupported step");
-        }
+        for (int i = 0; i < n_; ++i)
+            CHECK(expression(i, arith).is_valid(), "an unsupported step");
         return true;
     }
 };

@@ -25,13 +25,10 @@ namespace rvjit {
 
 using namespace Xbyak_riscv;
 
-/// Fills in `op`'s own `data`/`addr` for one position, then dispatches
-/// through `dialect.load(op)`/`dialect.store(op)` per `op.dir`
-static void emit(const operation::memory_t &dialect, memory::op_t op,
-        name_t data, const pointer_t &addr) {
-    op.data.name = data;
-    op.addr = addr;
-    op.dir == memory::dir_t::load ? dialect.load(op) : dialect.store(op);
+/// Emits `op`, as its direction says, on `data`, `addr` and `args`
+static void emit(const operation::memory_t &dialect, const memory::op_t &op,
+        name_t data, const pointer_t &addr, name_t args = no_name) {
+    dialect.of(op)(data, addr, args);
 }
 
 /// Unsupported byte widths emit nothing
@@ -146,9 +143,10 @@ TEST(memory_move_emission, vector_instructions) {
 
             // Unit-stride
             auto desc = memory::op_t().vector().as_type(dt);
+            name_t args = no_name;
 
             // Load
-            emit(env.mem, desc.load(), 0, ptr);
+            emit(env.mem, desc.load(), 0, ptr, args);
             switch (dt) {
                 case op_t::u8: gen.vle8_v(data, ptr); break;
                 case op_t::f16: gen.vle16_v(data, ptr); break;
@@ -157,7 +155,7 @@ TEST(memory_move_emission, vector_instructions) {
             }
 
             // Store
-            emit(env.mem, desc.store(), 0, ptr);
+            emit(env.mem, desc.store(), 0, ptr, args);
             switch (dt) {
                 case op_t::u8: gen.vse8_v(data, ptr); break;
                 case op_t::f16: gen.vse16_v(data, ptr); break;
@@ -166,10 +164,11 @@ TEST(memory_move_emission, vector_instructions) {
             }
 
             // Constant-stride
-            desc.strided(stride);
+            desc.strided();
+            args = reg_name(stride);
 
             // Load
-            emit(env.mem, desc.load(), 0, ptr);
+            emit(env.mem, desc.load(), 0, ptr, args);
             switch (dt) {
                 case op_t::u8: gen.vlse8_v(data, ptr, stride); break;
                 case op_t::f16: gen.vlse16_v(data, ptr, stride); break;
@@ -178,7 +177,7 @@ TEST(memory_move_emission, vector_instructions) {
             }
 
             // Store
-            emit(env.mem, desc.store(), 0, ptr);
+            emit(env.mem, desc.store(), 0, ptr, args);
             switch (dt) {
                 case op_t::u8: gen.vsse8_v(data, ptr, stride); break;
                 case op_t::f16: gen.vsse16_v(data, ptr, stride); break;
@@ -187,10 +186,11 @@ TEST(memory_move_emission, vector_instructions) {
             }
 
             // Indexed
-            desc.indexed(index);
+            desc.indexed();
+            args = reg_name(index);
 
             // Load
-            emit(env.mem, desc.load(), 0, ptr);
+            emit(env.mem, desc.load(), 0, ptr, args);
             switch (dt) {
                 case op_t::u8: gen.vluxei8_v(data, ptr, index); break;
                 case op_t::f16: gen.vluxei16_v(data, ptr, index); break;
@@ -199,7 +199,7 @@ TEST(memory_move_emission, vector_instructions) {
             }
 
             // Store
-            emit(env.mem, desc.store(), 0, ptr);
+            emit(env.mem, desc.store(), 0, ptr, args);
             switch (dt) {
                 case op_t::u8: gen.vsuxei8_v(data, ptr, index); break;
                 case op_t::f16: gen.vsuxei16_v(data, ptr, index); break;
@@ -222,15 +222,15 @@ TEST(memory_supports, widths) {
 
     {
         const auto op = op_t().scalar().load().as_type(type_t::f32);
-        EXPECT_TRUE(env.mem.supports_load(op));
+        EXPECT_TRUE(env.mem.load(op).is_valid());
     }
     {
         const auto op = op_t().scalar().store().as_type(type_t::s8);
-        EXPECT_TRUE(env.mem.supports_store(op));
+        EXPECT_TRUE(env.mem.store(op).is_valid());
     }
     {
         const auto op = op_t().vector().load().as_type(type_t::f32);
-        EXPECT_TRUE(env.mem.supports_load(op));
+        EXPECT_TRUE(env.mem.load(op).is_valid());
     }
 }
 

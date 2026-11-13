@@ -184,15 +184,9 @@ int main(int argc, char **argv) {
                 for (int i1 = 0; i1 < cfg_.shape[1]; ++i1) {
                     const index_t idx {i0, i1};
                     if (validate) {
-                        const pointer_t addr = it->pointer(idx);
-                        memory::op_t load_op = ld;
-                        load_op.data.name = reg_name(scratch);
-                        load_op.addr = addr;
-                        mem.load(load_op);
-                        memory::op_t store_op = st;
-                        store_op.data.name = reg_name(scratch);
-                        store_op.addr = pointer_t(results_ptr);
-                        mem.store(store_op);
+                        mem.load(ld)(reg_name(scratch), it->pointer(idx));
+                        mem.store(st)(
+                                reg_name(scratch), pointer_t(results_ptr));
                         addi(results_ptr, results_ptr, width);
                     }
                     it->iteration(idx);

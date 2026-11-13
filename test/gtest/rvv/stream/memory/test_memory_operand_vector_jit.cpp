@@ -63,7 +63,7 @@ rv64_jit_probe_t::generate_fn_t vector_roundtrip_probe(int rows, bool strided) {
         // ops have no immediate-offset form
         memory::op_t load_op
                 = memory::op_t().vector().load().as_type(type_t::f32);
-        if (strided) load_op.strided(stride_reg);
+        if (strided) load_op.strided();
         memory::op_t store_op = load_op;
         store_op.store();
 
@@ -71,14 +71,15 @@ rv64_jit_probe_t::generate_fn_t vector_roundtrip_probe(int rows, bool strided) {
         const buffer::buffer_t regs(&id, 1);
         const buffer_map_t ring(regs, {1, 1});
 
-        auto *load_stream
-                = env.memops.create(make_spec(load_op, pointer_t(in_ptr, 0),
-                                            in_space, addressing_t::base_only),
-                        make_variant(rv64::stream::iterator::guided, 0, ring));
-        auto *store_stream
-                = env.memops.create(make_spec(store_op, pointer_t(out_ptr, 0),
-                                            out_space, addressing_t::base_only),
-                        make_variant(rv64::stream::iterator::guided, 0, ring));
+        memory_spec_t load_spec = make_spec(load_op, pointer_t(in_ptr, 0),
+                in_space, addressing_t::base_only);
+        memory_spec_t store_spec = make_spec(store_op, pointer_t(out_ptr, 0),
+                out_space, addressing_t::base_only);
+        if (strided) load_spec.args = store_spec.args = reg_name(stride_reg);
+        auto *load_stream = env.memops.create(load_spec,
+                make_variant(rv64::stream::iterator::guided, 0, ring));
+        auto *store_stream = env.memops.create(store_spec,
+                make_variant(rv64::stream::iterator::guided, 0, ring));
         ASSERT_TRUE(load_stream->is_valid());
         ASSERT_TRUE(store_stream->is_valid());
 

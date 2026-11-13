@@ -162,14 +162,8 @@ private:
     int step_ = -1;
 
     // Emits step `s` from `src` into `dst`, in its configuration
-    bool emit_step_(int s, name_t dst, name_t src) const {
-        const arithmetic::op_t o = conv_.op(s, dst, src);
-        switch (conv_.step(s).kind) {
-            case conversion::kind_t::extend: return arith_->extend(o);
-            case conversion::kind_t::widen: return arith_->widen(o);
-            case conversion::kind_t::convert: return arith_->convert(o);
-            default: return arith_->narrow(o);
-        }
+    void emit_step_(int s, name_t dst, name_t src) const {
+        conv_.expression(s, *arith_)(dst, src);
     }
 
     bool reconfigure_(type_t t) {

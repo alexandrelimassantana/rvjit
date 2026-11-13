@@ -142,17 +142,16 @@ inline int sewb(const type_t &dt) {
     }
 }
 
-/// Data operand for operations with generic type, form, or numerical kind
+/// Data operand of an operation: its form, type, and numerical kind
+///
+/// @details Describes what an operation reads or writes, never which register
+///     holds it: an expression is called with its registers
 ///
 /// @note The `form, kind, type` triplet determines the ISA operand traits
-/// @note The `name` parameter informs the generic operand buffer id
-/// @note Whether `name` is a valid name choice for the underlying ISA and
-///     considering the ISA traits is not verified by the `is_valid` function
 struct operand_t : public typed_t {
     form_t form = form_t::vector;
     kind_t kind = kind_t::floating;
     type_t type = type_t::f32;
-    name_t name = no_name;
     int width = 4;
     bool sign = false;
 
@@ -162,10 +161,9 @@ struct operand_t : public typed_t {
     ///
     /// @param form The storage category
     /// @param dt The data type, which sets `kind`, `width` and `sign`
-    /// @param i The buffer id, `no_name` until allocated
-    operand_t(form_t form, type_t dt, name_t i = 0) : form(form), name(i) {
-        set_type(dt);
-    }
+    ///
+    /// @note Not explicit: `{form, dt}` converts to an operand
+    operand_t(form_t form, type_t dt) : form(form) { set_type(dt); }
 
     /// Sets the data type and derives `kind`, `width` and `sign` from it
     ///
@@ -186,14 +184,11 @@ struct operand_t : public typed_t {
     /// Whether the storage category was chosen
     bool is_defined() const { return form != form_t::undefined; }
 
-    /// Whether the buffer id was allocated
-    bool has_name() const { return name != no_name; }
-
     /// Whether the width is a power of two
     bool has_valid_width() const { return is_pow2(width) && width > 0; }
 
-    /// Whether the operand has a buffer id and a valid width
-    bool is_valid() const { return has_name() && has_valid_width(); }
+    /// Whether the storage category was chosen and the width is valid
+    bool is_valid() const { return is_defined() && has_valid_width(); }
 };
 
 } // namespace rvjit
