@@ -91,6 +91,13 @@ struct op_t : public typed_t {
                 && rs1.width == rs2.width;
     }
 
+    /// Whether the destination and the second source are twice as wide as
+    /// the first source
+    bool is_wide_operand() const {
+        return is_ternary() && rd.width == rs2.width
+                && rd.width == 2 * rs1.width;
+    }
+
     /// Sets every operand to the scalar form
     op_t &scalar() {
         rd.form = rs1.form = rs2.form = rvjit::form_t::scalar;
@@ -145,6 +152,17 @@ struct op_t : public typed_t {
         return op_t(wide, narrow, narrow);
     }
 
+    /// Creates a ternary operation whose first source is `dt` and whose
+    /// destination and second source are the natural 2x-wide type of `dt`
+    ///
+    /// @param dt The data type of the first source
+    /// @param form The storage category of every operand
+    static op_t wide_operand(type_t dt, rvjit::form_t form) {
+        const operand_t wide(form, natural_wide(dt));
+        const operand_t narrow(form, dt);
+        return op_t(wide, narrow, wide);
+    }
+
 private:
     static operand_t absent_() {
         return operand_t(rvjit::form_t::undefined, type_t::none);
@@ -180,6 +198,12 @@ struct args_t {
 using expression_t = operation::expression_t<op_t, args_t>;
 using expression_impl_t = operation::expression_impl_t<op_t, args_t>;
 
+/// The implementation of a kind a target lacks, never valid
+struct unimplemented_t : public expression_impl_t {
+    /// Creates the placeholder
+    explicit unimplemented_t(emitter_t) {}
+};
+
 } // namespace arithmetic
 } // namespace rvjit
 
@@ -196,6 +220,9 @@ namespace operation {
 ///
 /// @note An implementation overrides the protected accessors of the kinds it
 ///     implements; the others are never valid
+/// @note What a scalar register holds above a narrow integer's width is the
+///     implementation's contract: each kind documents what it reads there
+///     and leaves there
 struct arithmetic_t {
     static constexpr const char *NAME = "rvjit::operation::arithmetic";
 
@@ -249,7 +276,8 @@ struct arithmetic_t {
     ///
     /// @param op The operation
     ///
-    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
+    /// @pre The `op.is_ternary()` expression is true, and `op.is_uniform()`
+    ///     or `op.is_widening()` is true
     arithmetic::expression_t mul(const arithmetic::op_t &op) const {
         return arithmetic::expression_t(mul_(), op);
     }
@@ -276,7 +304,8 @@ struct arithmetic_t {
     ///
     /// @param op The operation
     ///
-    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
+    /// @pre The `op.is_ternary()` expression is true, and `op.is_uniform()`,
+    ///     `op.is_widening()` or `op.is_wide_operand()` is true
     arithmetic::expression_t add(const arithmetic::op_t &op) const {
         return arithmetic::expression_t(add_(), op);
     }
@@ -297,6 +326,35 @@ struct arithmetic_t {
     arithmetic::expression_t add(const operand_t &rd, const operand_t &rs1,
             const operand_t &rs2) const {
         return add(arithmetic::op_t(rd, rs1, rs2));
+    }
+
+    /// Division expression, `rd = rs2 / rs1`
+    ///
+    /// @param op The operation
+    ///
+    /// @note A scalar `rs1` is the divisor
+    ///
+    /// @pre The `op.is_ternary()` and `op.is_uniform()` expressions are true
+    arithmetic::expression_t div(const arithmetic::op_t &op) const {
+        return arithmetic::expression_t(div_(), op);
+    }
+
+    /// Division expression whose operands share a form and type
+    ///
+    /// @param form The storage category of every operand
+    /// @param dt The data type of every operand
+    arithmetic::expression_t div(form_t form, type_t dt) const {
+        return div(arithmetic::op_t::uniform(dt, form));
+    }
+
+    /// Division expression of three operands
+    ///
+    /// @param rd The destination operand
+    /// @param rs1 The divisor operand
+    /// @param rs2 The dividend operand
+    arithmetic::expression_t div(const operand_t &rd, const operand_t &rs1,
+            const operand_t &rs2) const {
+        return div(arithmetic::op_t(rd, rs1, rs2));
     }
 
     /// Bit-pattern move from an integer `rs1` into a float `rd`
@@ -338,6 +396,11 @@ protected:
         return unimplemented_();
     }
 
+    /// The logic of `div`
+    virtual const arithmetic::expression_impl_t &div_() const {
+        return unimplemented_();
+    }
+
     /// The logic of `bitcast`
     virtual const arithmetic::expression_impl_t &bitcast_() const {
         return unimplemented_();
@@ -354,8 +417,10 @@ private:
 ///
 /// @details Each implementation derives from `arithmetic::expression_impl_t`
 ///     and is constructible from `emitter_t`
+///
+/// @note A target without `div` leaves `DivOp` to `arithmetic::unimplemented_t`
 template <typename MaccOp, typename ZeroOp, typename MulOp, typename AddOp,
-        typename BitcastOp>
+        typename BitcastOp, typename DivOp = arithmetic::unimplemented_t>
 struct arithmetic_compose_t : public arithmetic_t {
     /// Constructs every expression implementation
     ///
@@ -365,7 +430,8 @@ struct arithmetic_compose_t : public arithmetic_t {
         , zero_impl_(e)
         , mul_impl_(e)
         , add_impl_(e)
-        , bitcast_impl_(e) {}
+        , bitcast_impl_(e)
+        , div_impl_(e) {}
 
 protected:
     const arithmetic::expression_impl_t &macc_() const override {
@@ -383,12 +449,16 @@ protected:
     const arithmetic::expression_impl_t &bitcast_() const override {
         return bitcast_impl_;
     }
+    const arithmetic::expression_impl_t &div_() const override {
+        return div_impl_;
+    }
 
     MaccOp macc_impl_;
     ZeroOp zero_impl_;
     MulOp mul_impl_;
     AddOp add_impl_;
     BitcastOp bitcast_impl_;
+    DivOp div_impl_;
 };
 
 } // namespace operation
