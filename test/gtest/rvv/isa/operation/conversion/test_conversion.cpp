@@ -28,7 +28,7 @@ using namespace Xbyak_riscv;
 
 /// narrow emits the float conversions and the saturating integer clips
 TEST(narrow_emission, valid_instructions) {
-    static constexpr int n_pairs = 7;
+    static constexpr int n_pairs = 8;
 
     rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
         env_t env(gen);
@@ -51,6 +51,8 @@ TEST(narrow_emission, valid_instructions) {
         gen.vnclip_wi(vd, vs, 0);
         emit(type_t::u8, type_t::u16, 8, 16);
         gen.vnclipu_wi(vd, vs, 0);
+        emit(type_t::u32, type_t::u64, 8, 16);
+        gen.vnclipu_wi(vd, vs, 0);
 
         // In place: the destination is the source's lowest-numbered part
         emit(type_t::f16, type_t::f32, 16, 16);
@@ -64,7 +66,7 @@ TEST(narrow_emission, valid_instructions) {
 
 /// widen emits the float conversions and the sign or zero extensions
 TEST(widen_emission, valid_instructions) {
-    static constexpr int n_pairs = 7;
+    static constexpr int n_pairs = 8;
 
     rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
         env_t env(gen);
@@ -88,6 +90,8 @@ TEST(widen_emission, valid_instructions) {
         emit(type_t::u16, type_t::u8);
         gen.vwaddu_vx(vd, vs, zero);
         emit(type_t::s32, type_t::u16);
+        gen.vwaddu_vx(vd, vs, zero);
+        emit(type_t::u64, type_t::u32);
         gen.vwaddu_vx(vd, vs, zero);
 
         gen.ret();
@@ -132,7 +136,7 @@ TEST(narrow_widen_valid, shapes) {
 
 /// extend emits the 2x, 4x and 8x sign or zero extensions
 TEST(extend_emission, valid_instructions) {
-    static constexpr int n_pairs = 6;
+    static constexpr int n_pairs = 7;
 
     rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
         env_t env(gen);
@@ -155,6 +159,8 @@ TEST(extend_emission, valid_instructions) {
         gen.vzext_vf4(vd, vs);
         emit(type_t::s64, type_t::u16);
         gen.vzext_vf4(vd, vs);
+        emit(type_t::u64, type_t::u8);
+        gen.vzext_vf8(vd, vs);
 
         gen.ret();
     });
@@ -165,7 +171,7 @@ TEST(extend_emission, valid_instructions) {
 /// cast emits the vector integer-float conversions, and the scalar ones
 /// through RV64
 TEST(cast_emission, valid_instructions) {
-    static constexpr int n_pairs = 8;
+    static constexpr int n_pairs = 10;
 
     rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
         env_t env(gen);
@@ -184,6 +190,10 @@ TEST(cast_emission, valid_instructions) {
         emit(type_t::s32, type_t::f32, vec);
         gen.vfcvt_x_f_v(vd, vs);
         emit(type_t::u16, type_t::f16, vec);
+        gen.vfcvt_xu_f_v(vd, vs);
+        emit(type_t::f64, type_t::u64, vec);
+        gen.vfcvt_f_xu_v(vd, vs);
+        emit(type_t::u64, type_t::f64, vec);
         gen.vfcvt_xu_f_v(vd, vs);
         emit(type_t::f32, type_t::s32, sca);
         gen.fcvt_s_w(FReg(8), Reg(16));
