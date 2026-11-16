@@ -17,6 +17,7 @@
 #ifndef RVJIT_IMPLEMENTATION_RVV_ISA_OPERATION_ARITHMETIC_MACC_HPP
 #define RVJIT_IMPLEMENTATION_RVV_ISA_OPERATION_ARITHMETIC_MACC_HPP
 
+#include "rvjit/implementation/rv64/isa/operation/arithmetic/macc.hpp"
 #include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/interface/isa/operand.hpp"
 #include "rvjit/interface/isa/operation/arithmetic.hpp"
@@ -28,32 +29,37 @@ namespace rvjit {
 namespace rvv {
 namespace arithmetic {
 
-/// General vector multiply-accumulate instruction
+/// General multiply-accumulate instruction, extending the RV64 scalar one
+/// with vectors
 ///
 /// @note Dispatches code emission based on the operands data object parameter
 ///
 /// @details Dispatches to v{,w}macc{,u,su,us} on int vector forms
 /// @details Dispatches to vfmacc/vfwmacc/vfwmaccbf16 on float vector forms
+/// @details Leaves a scalar `rd` to `rv64::arithmetic::macc_t`
 ///
-/// @pre The caller must issue `vsetvli` prior to calling this expression and
-///     the `vtype` must be configured using the inputs SEW configuration
-struct macc_t : public rvjit::arithmetic::expression_impl_t {
+/// @pre The caller must issue `vsetvli` prior to calling a vector form of
+///     this expression and the `vtype` must be configured using the inputs
+///     SEW configuration
+struct macc_t : public rv64::arithmetic::macc_t {
     static constexpr const char *NAME = "rvjit::rvv::arithmetic";
 
     /// Creates the component
     ///
     /// @param e The emitter instructions are emitted through
-    explicit macc_t(rvjit::emitter_t e) : e_(e) {}
+    explicit macc_t(rvjit::emitter_t e) : rv64::arithmetic::macc_t(e), e_(e) {}
 
-    /// Whether `op` maps to a supported macc instruction
-    ///
-    /// @param op The operation checked
     bool is_valid(const rvjit::arithmetic::op_t &op) const override {
+        if (!op.rd.is_vector()) return rv64::arithmetic::macc_t::is_valid(op);
         return select_(op) != sel_t::none;
     }
 
     void emit(const rvjit::arithmetic::op_t &op,
             const rvjit::arithmetic::args_t &args) const override {
+        if (!op.rd.is_vector()) {
+            rv64::arithmetic::macc_t::emit(op, args);
+            return;
+        }
         CHECK_OR_RET(
                 op.is_ternary(), , "expected a ternary operand descriptor");
         CHECK_OR_RET(all_valid(op.rd, op.rs1, op.rs2) && args.named(3), ,
