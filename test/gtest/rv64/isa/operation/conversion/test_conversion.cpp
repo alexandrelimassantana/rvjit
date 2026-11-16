@@ -28,7 +28,7 @@ using namespace Xbyak_riscv;
 
 /// cast emits the scalar integer-float conversions
 TEST(rv64_cast_emission, valid_instructions) {
-    static constexpr int n_pairs = 4;
+    static constexpr int n_pairs = 6;
 
     rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
         env_t env(gen);
@@ -46,6 +46,10 @@ TEST(rv64_cast_emission, valid_instructions) {
         gen.fcvt_w_h(Reg(8), FReg(16));
         emit(type_t::s64, type_t::f32);
         gen.fcvt_l_s(Reg(8), FReg(16));
+        emit(type_t::f32, type_t::u64);
+        gen.fcvt_s_lu(FReg(8), Reg(16));
+        emit(type_t::u64, type_t::f64);
+        gen.fcvt_lu_d(Reg(8), FReg(16));
 
         gen.ret();
     });
