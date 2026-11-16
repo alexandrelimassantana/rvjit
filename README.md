@@ -159,8 +159,10 @@ vload(reg_name(v8), pointer_t(a0, 0)); // vle32.v v8, (a0)
 Multiply-accumulate, add, mul, div, zero and bitcast, each an expression
 created from its operands' forms and types and called with their registers; one
 expression emits any number of times. The operand widths choose between a
-same-width and a widening instruction. `is_valid` tells whether the target can
-emit it. Interface:
+same-width and a widening instruction, and scalar operands the RV64 scalar
+instruction; each kind documents what it reads and leaves above a narrow scalar
+integer's width, and the conversion dialect's `extend` restores those bits.
+`is_valid` tells whether the target can emit it. Interface:
 [`arithmetic.hpp`](rvjit/interface/isa/operation/arithmetic.hpp).
 
 ```cpp

@@ -17,35 +17,21 @@
 #ifndef RVJIT_IMPLEMENTATION_RV64_ISA_OPERATION_ARITHMETIC_HPP
 #define RVJIT_IMPLEMENTATION_RV64_ISA_OPERATION_ARITHMETIC_HPP
 
+#include "rvjit/implementation/rv64/isa/operation/arithmetic/add.hpp"
 #include "rvjit/implementation/rv64/isa/operation/arithmetic/bitcast.hpp"
+#include "rvjit/implementation/rv64/isa/operation/arithmetic/div.hpp"
+#include "rvjit/implementation/rv64/isa/operation/arithmetic/macc.hpp"
+#include "rvjit/implementation/rv64/isa/operation/arithmetic/mul.hpp"
 #include "rvjit/implementation/rv64/isa/operation/arithmetic/zero.hpp"
-#include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/interface/isa/operation/arithmetic.hpp"
-#include "rvjit/interface/isa/types.hpp"
 
 namespace rvjit {
 namespace rv64 {
 namespace arithmetic {
 
-/// RV64 arithmetic dialect: scalar zero and bitcast only
-struct arithmetic_t : public operation::arithmetic_t {
-    /// Creates the component
-    ///
-    /// @param e The emitter instructions are emitted through
-    explicit arithmetic_t(rvjit::emitter_t e)
-        : zero_impl_(e), bitcast_impl_(e) {}
-
-protected:
-    const rvjit::arithmetic::expression_impl_t &zero_() const override {
-        return zero_impl_;
-    }
-    const rvjit::arithmetic::expression_impl_t &bitcast_() const override {
-        return bitcast_impl_;
-    }
-
-    zero_t zero_impl_;
-    bitcast_t bitcast_impl_;
-};
+/// RV64 arithmetic dialect: scalar macc, zero, mul, add, div and bitcast
+using arithmetic_t = operation::arithmetic_compose_t<macc_t, zero_t, mul_t,
+        add_t, bitcast_t, div_t>;
 
 } // namespace arithmetic
 } // namespace rv64
