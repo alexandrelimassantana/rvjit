@@ -27,8 +27,11 @@ namespace rvjit {
 namespace rvv {
 namespace conversion {
 
-/// RVV conversion dialect: the RV64 scalar cast, extended with
-/// vector-to-vector narrowings, widenings, extensions and casts
+/// RVV conversion dialect: vector-to-vector narrowings, widenings, extensions
+/// and casts, extending the RV64 dialect's scalar widen, extend and cast
+///
+/// @note Each scalar-to-scalar conversion is the RV64 expression's, under its
+///     conditions; there is no scalar narrowing, and mixed forms are invalid
 using conversion_t
         = operation::conversion_compose_t<narrow_t, widen_t, extend_t, cast_t>;
 

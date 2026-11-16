@@ -36,7 +36,7 @@ namespace conversion {
 ///
 /// @note Floats round to nearest even under the default `frm`
 /// @note Only vector-to-vector conversions are valid: RV64 has no scalar
-///     narrowing to extend
+///     narrowing to extend, unlike `widen_t`, `extend_t` and `cast_t`
 ///
 /// @pre The caller must issue `vsetvli` prior to calling this expression and
 ///     the `vtype` must be configured using the destination's SEW and LMUL

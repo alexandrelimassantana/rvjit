@@ -206,7 +206,12 @@ TEST(typecast_configure, scalar_casts_need_no_state) {
     EXPECT_EQ(tc.nsteps(), 1);
     EXPECT_FALSE(tc.interposes(0));
     EXPECT_FALSE(tc.interposes(1));
-    EXPECT_FALSE(tc.configure(conversion::op_t(type_t::f32, type_t::s8, sca)));
+    ASSERT_TRUE(tc.configure(conversion::op_t(type_t::f32, type_t::s8, sca)));
+    EXPECT_EQ(tc.nsteps(), 2);
+    EXPECT_FALSE(tc.interposes(1));
+    ASSERT_TRUE(tc.configure(conversion::op_t(type_t::s32, type_t::s16, sca)));
+    EXPECT_EQ(tc.nsteps(), 1);
+    EXPECT_FALSE(tc.configure(conversion::op_t(type_t::s16, type_t::s32, sca)));
 }
 
 /// Interposing and emitting a store's narrowing emits each step at its width
