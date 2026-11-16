@@ -259,7 +259,7 @@ private:
             case 1: return sign ? type_t::s8 : type_t::u8;
             case 2: return sign ? type_t::s16 : type_t::u16;
             case 4: return sign ? type_t::s32 : type_t::u32;
-            case 8: return sign ? type_t::s64 : type_t::none;
+            case 8: return sign ? type_t::s64 : type_t::u64;
             default: return type_t::none;
         }
     }

@@ -33,6 +33,7 @@ enum class type_t {
     s32,
     u32,
     s64,
+    u64,
     f16,
     bf16,
     f32,
@@ -72,7 +73,7 @@ struct typed_t {
 ///
 /// @param dt The narrow operand type
 ///
-/// @note s64 and f64 map to `none`
+/// @note s64, u64 and f64 map to `none`
 /// @note u16 maps to s32, which holds every u16 value
 inline type_t natural_wide(const type_t &dt) {
     switch (dt) {
@@ -86,6 +87,7 @@ inline type_t natural_wide(const type_t &dt) {
         case type_t::s32:
         case type_t::u32: return type_t::s64;
         case type_t::s64:
+        case type_t::u64:
         case type_t::f64: return type_t::none;
         default: return type_t::none;
     }
@@ -115,7 +117,8 @@ inline bool is_int(const type_t &dt) {
         case type_t::u16:
         case type_t::s32:
         case type_t::u32:
-        case type_t::s64: return true;
+        case type_t::s64:
+        case type_t::u64: return true;
         default: return false;
     }
 }
@@ -137,6 +140,7 @@ inline int sewb(const type_t &dt) {
         case type_t::u32:
         case type_t::f32: return 4;
         case type_t::s64:
+        case type_t::u64:
         case type_t::f64: return 8;
         default: return 0;
     }

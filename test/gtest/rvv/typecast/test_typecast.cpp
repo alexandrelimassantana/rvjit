@@ -77,6 +77,9 @@ TEST(typecast_configure, steps) {
     EXPECT_EQ(kinds(type_t::f16, type_t::f64), "-");
     EXPECT_EQ(kinds(type_t::s32, type_t::u8), "-");
     EXPECT_EQ(kinds(type_t::s32, type_t::u32), "-");
+    EXPECT_EQ(kinds(type_t::u64, type_t::f64), "C");
+    EXPECT_EQ(kinds(type_t::u32, type_t::u64), "W");
+    EXPECT_EQ(kinds(type_t::s64, type_t::u64), "-");
     EXPECT_EQ(kinds(type_t::u8, type_t::s8), "-");
     EXPECT_EQ(kinds(type_t::s32, type_t::f16), "-");
     EXPECT_EQ(kinds(type_t::bf16, type_t::s16), "-");
