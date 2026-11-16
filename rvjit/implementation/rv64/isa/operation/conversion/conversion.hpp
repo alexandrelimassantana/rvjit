@@ -18,6 +18,8 @@
 #define RVJIT_IMPLEMENTATION_RV64_ISA_OPERATION_CONVERSION_HPP
 
 #include "rvjit/implementation/rv64/isa/operation/conversion/cast.hpp"
+#include "rvjit/implementation/rv64/isa/operation/conversion/extend.hpp"
+#include "rvjit/implementation/rv64/isa/operation/conversion/widen.hpp"
 #include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/interface/isa/operation/conversion.hpp"
 #include "rvjit/interface/isa/types.hpp"
@@ -28,18 +30,27 @@ namespace conversion {
 
 /// RV64 conversion dialect, scalar-to-scalar only
 ///
-/// @note Only `cast` is implemented
+/// @note Only `widen`, `extend` and `cast` are implemented
 struct conversion_t : public operation::conversion_t {
     /// Creates the component
     ///
     /// @param e The emitter instructions are emitted through
-    explicit conversion_t(rvjit::emitter_t e) : cast_impl_(e) {}
+    explicit conversion_t(rvjit::emitter_t e)
+        : widen_impl_(e), extend_impl_(e), cast_impl_(e) {}
 
+    const rvjit::conversion::expression_impl_t &widen_() const override {
+        return widen_impl_;
+    }
+    const rvjit::conversion::expression_impl_t &extend_() const override {
+        return extend_impl_;
+    }
     const rvjit::conversion::expression_impl_t &cast_() const override {
         return cast_impl_;
     }
 
 protected:
+    widen_t widen_impl_;
+    extend_t extend_impl_;
     cast_t cast_impl_;
 };
 
