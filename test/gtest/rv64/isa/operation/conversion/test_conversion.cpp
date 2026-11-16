@@ -73,8 +73,108 @@ TEST(rv64_cast_valid, shapes) {
     EXPECT_FALSE(cv.cast(vec, type_t::f32, type_t::s32).is_valid());
 }
 
-/// Only cast is implemented: narrow, widen and extend reject everything
-TEST(rv64_conversion_valid, only_cast) {
+/// extend emits `addiw` (s32), `andi` (u8) or a pair of shifts
+TEST(rv64_extend_emission, valid_instructions) {
+    static constexpr int n_instructions = 10;
+
+    rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
+        env_t env(gen);
+        rv64::conversion::conversion_t cv(env.e);
+        const auto sca = rvjit::form_t::scalar;
+        const auto rd = Reg(8);
+        const auto rs = Reg(16);
+
+        // The probes, then the reference instructions
+        cv.extend(sca, type_t::s64, type_t::s32)(8, 16);
+        cv.extend(sca, type_t::u16, type_t::u8)(8, 16);
+        cv.extend(sca, type_t::s16, type_t::s8)(8, 16);
+        cv.extend(sca, type_t::s64, type_t::s16)(8, 16);
+        cv.extend(sca, type_t::s32, type_t::u16)(8, 16);
+        cv.extend(sca, type_t::u64, type_t::u32)(8, 16);
+        gen.addiw(rd, rs, 0);
+        gen.andi(rd, rs, 0xff);
+        gen.slli(rd, rs, 56);
+        gen.srai(rd, rd, 56);
+        gen.slli(rd, rs, 48);
+        gen.srai(rd, rd, 48);
+        gen.slli(rd, rs, 48);
+        gen.srli(rd, rd, 48);
+        gen.slli(rd, rs, 32);
+        gen.srli(rd, rd, 32);
+
+        gen.ret();
+    });
+    ASSERT_TRUE(kernel.create_kernel());
+    expect_matching_halves(kernel, n_instructions);
+}
+
+/// extend reads only the source's low bits and fills the rest by its sign
+TEST(rv64_extend_values, fills_by_the_source_sign) {
+    const auto run = [](type_t to, type_t from, int64_t v) -> int64_t {
+        rv64_jit_probe_t kernel([to, from](rv64_jit_test_generator_t &gen) {
+            env_t env(gen);
+            rv64::conversion::conversion_t cv(env.e);
+            cv.extend(rvjit::form_t::scalar, to, from)(11, 11);
+            gen.sd(Reg(11), Reg(10));
+            gen.ret();
+        });
+        int64_t out = 0;
+        if (kernel.create_kernel()) kernel(&out, v);
+        return out;
+    };
+    const int64_t dirty = int64_t(0x1234567800000000);
+    EXPECT_EQ(run(type_t::s16, type_t::s8, dirty | 0x80), -128);
+    EXPECT_EQ(run(type_t::u16, type_t::u8, dirty | 0x1ff), 0xff);
+    EXPECT_EQ(run(type_t::s32, type_t::s16, dirty | 0x8001), -32767);
+    EXPECT_EQ(run(type_t::u32, type_t::u16, dirty | 0xffff), 0xffff);
+    EXPECT_EQ(run(type_t::s64, type_t::s32, dirty | 0x80000000), INT32_MIN);
+    EXPECT_EQ(run(type_t::u64, type_t::u32, dirty | 0x80000000), 0x80000000);
+}
+
+/// extend needs a 2, 4 or 8 times wider integer and never signed to unsigned
+TEST(rv64_extend_valid, shapes) {
+    Xbyak_riscv::CodeGenerator gen;
+    env_t env(gen);
+    rv64::conversion::conversion_t cv(env.e);
+    const auto sca = rvjit::form_t::scalar;
+    const auto vec = rvjit::form_t::vector;
+
+    EXPECT_TRUE(cv.extend(sca, type_t::s64, type_t::s8).is_valid());
+    EXPECT_TRUE(cv.extend(sca, type_t::s16, type_t::u8).is_valid());
+    EXPECT_FALSE(cv.extend(sca, type_t::u16, type_t::s8).is_valid());
+    EXPECT_FALSE(cv.extend(sca, type_t::s32, type_t::s32).is_valid());
+    EXPECT_FALSE(cv.extend(sca, type_t::s8, type_t::s16).is_valid());
+    EXPECT_FALSE(cv.extend(sca, type_t::f32, type_t::f16).is_valid());
+    EXPECT_FALSE(cv.extend(vec, type_t::s32, type_t::s8).is_valid());
+}
+
+/// widen is extend at 2x: integers only, never signed to unsigned
+TEST(rv64_widen_emission, extends_integers_at_2x) {
+    static constexpr int n_instructions = 4;
+
+    rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
+        env_t env(gen);
+        rv64::conversion::conversion_t cv(env.e);
+        const auto sca = rvjit::form_t::scalar;
+        const auto rd = Reg(8);
+        const auto rs = Reg(16);
+
+        // The probes, then the reference instructions
+        cv.widen(sca, type_t::s32, type_t::s16)(8, 16);
+        cv.widen(sca, type_t::u64, type_t::u32)(8, 16);
+        gen.slli(rd, rs, 48);
+        gen.srai(rd, rd, 48);
+        gen.slli(rd, rs, 32);
+        gen.srli(rd, rd, 32);
+
+        gen.ret();
+    });
+    ASSERT_TRUE(kernel.create_kernel());
+    expect_matching_halves(kernel, n_instructions);
+}
+
+/// Only widen, extend and cast are implemented; widen takes integers at 2x
+TEST(rv64_conversion_valid, widen_extend_and_cast) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
     rv64::conversion::conversion_t cv(env.e);
@@ -83,7 +183,10 @@ TEST(rv64_conversion_valid, only_cast) {
 
     EXPECT_FALSE(cv.narrow(sca, type_t::f32, type_t::f64).is_valid());
     EXPECT_FALSE(cv.widen(sca, type_t::f64, type_t::f32).is_valid());
-    EXPECT_FALSE(cv.extend(sca, type_t::s64, type_t::s32).is_valid());
+    EXPECT_TRUE(cv.widen(sca, type_t::s64, type_t::u32).is_valid());
+    EXPECT_FALSE(cv.widen(sca, type_t::s32, type_t::s8).is_valid());
+    EXPECT_FALSE(cv.widen(sca, type_t::u32, type_t::s16).is_valid());
+    EXPECT_TRUE(cv.extend(sca, type_t::s64, type_t::s32).is_valid());
 }
 
 } // namespace rvjit

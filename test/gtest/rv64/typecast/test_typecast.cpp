@@ -38,16 +38,28 @@ TEST(rv64_typecast, casts_without_interposing) {
     EXPECT_FALSE(tc.interposes(1));
 }
 
-/// Chains needing a narrowing, a widening or an extension are rejected
+/// Chains needing a narrowing or a float widening are rejected
 TEST(rv64_typecast, rejects_unimplemented_steps) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
     rv64::conversion::conversion_t cv(env.e);
     rv64::typecast::typecast_t tc(cv);
     const auto sca = form_t::scalar;
-    EXPECT_FALSE(tc.configure(conversion::op_t(type_t::f32, type_t::s8, sca)));
+    EXPECT_FALSE(tc.configure(conversion::op_t(type_t::s16, type_t::s32, sca)));
     EXPECT_FALSE(tc.configure(conversion::op_t(type_t::f64, type_t::f32, sca)));
     EXPECT_FALSE(tc.configure(conversion::op_t(type_t::s8, type_t::f32, sca)));
+}
+
+/// A 2x integer widening plans one widen step
+TEST(rv64_typecast, widens_integers) {
+    Xbyak_riscv::CodeGenerator gen;
+    env_t env(gen);
+    rv64::conversion::conversion_t cv(env.e);
+    rv64::typecast::typecast_t tc(cv);
+    const conversion::op_t op(type_t::s32, type_t::s16, form_t::scalar);
+    ASSERT_TRUE(tc.configure(op));
+    ASSERT_EQ(tc.nsteps(), 1);
+    EXPECT_EQ(tc.step(0).kind, typecast::typecast_t::step_t::widen);
 }
 
 /// Vector operands are rejected: every RV64 step is scalar-to-scalar
@@ -76,6 +88,26 @@ TEST(rv64_typecast, emit_runs_the_whole_chain) {
     });
     ASSERT_TRUE(kernel.create_kernel());
     expect_matching_pairs(kernel, n_pairs);
+}
+
+/// A narrow integer extends in place in its integer register, then casts
+/// into the float one
+TEST(rv64_typecast, extends_then_casts) {
+    static constexpr int n_instructions = 3;
+
+    rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
+        env_t env(gen);
+        rv64::conversion::conversion_t cv(env.e);
+        rv64::typecast::typecast_t tc(cv);
+        tc.configure(conversion::op_t(type_t::f32, type_t::s8, form_t::scalar));
+        tc.emit(8, 16);
+        gen.slli(Reg(16), Reg(16), 56);
+        gen.srai(Reg(16), Reg(16), 56);
+        gen.fcvt_s_w(FReg(8), Reg(16));
+        gen.ret();
+    });
+    ASSERT_TRUE(kernel.create_kernel());
+    expect_matching_halves(kernel, n_instructions);
 }
 
 /// emit casts through the dialect

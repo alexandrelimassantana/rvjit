@@ -179,7 +179,8 @@ fma_vf(reg_name(v16), reg_name(fa0), reg_name(v12)); // vfmacc.vf v16, fa0, v12
 Narrow, widen, extend and cast, each an expression over a source and a
 destination operand, created from their forms and types and called with
 their registers. `is_valid` tells whether the target can emit a conversion:
-RVV converts vectors and casts scalars through RV64. Interface:
+RVV converts vectors and leaves scalars to RV64, which widens and extends
+integers and casts between integers and floats. Interface:
 [`conversion.hpp`](rvjit/interface/isa/operation/conversion.hpp).
 
 ```cpp
