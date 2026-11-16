@@ -17,6 +17,7 @@
 #ifndef RVJIT_IMPLEMENTATION_RVV_ISA_OPERATION_CONVERSION_EXTEND_HPP
 #define RVJIT_IMPLEMENTATION_RVV_ISA_OPERATION_CONVERSION_EXTEND_HPP
 
+#include "rvjit/implementation/rv64/isa/operation/conversion/extend.hpp"
 #include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/interface/isa/operand.hpp"
 #include "rvjit/interface/isa/operation/conversion.hpp"
@@ -28,33 +29,41 @@ namespace rvjit {
 namespace rvv {
 namespace conversion {
 
-/// Vector integer extension into a type 2, 4 or 8 times as wide
+/// Integer extension into a type 2, 4 or 8 times as wide, extending the RV64
+/// scalar extension with vector-to-vector conversions
 ///
 /// @details Dispatches to `vsext.vf2/vf4/vf8` on a signed source and to
 ///     `vzext.vf2/vf4/vf8` on an unsigned one
 ///
-/// @note Only vector-to-vector conversions are valid: RV64 has no scalar
-///     extension to extend
+/// @note Scalar-to-scalar conversions are left to `rv64::conversion::extend_t`,
+///     under its conditions; mixed forms are invalid
 ///
-/// @pre The caller must issue `vsetvli` prior to calling this expression and
-///     the `vtype` must be configured using the destination's SEW and LMUL,
-///     unlike `widen_t`
-/// @pre The source group is the highest-numbered part of the destination
-///     group, or does not overlap it
-struct extend_t : public rvjit::conversion::expression_impl_t {
+/// @pre The caller must issue `vsetvli` prior to calling a vector form of
+///     this expression and the `vtype` must be configured using the
+///     destination's SEW and LMUL, unlike `widen_t`
+/// @pre On vector forms, the source group is the highest-numbered part of the
+///     destination group, or does not overlap it
+struct extend_t : public rv64::conversion::extend_t {
     static constexpr const char *NAME = "rvjit::rvv::conversion::extend";
 
     /// Creates the component
     ///
     /// @param e The emitter instructions are emitted through
-    explicit extend_t(rvjit::emitter_t e) : e_(e) {}
+    explicit extend_t(rvjit::emitter_t e)
+        : rv64::conversion::extend_t(e), e_(e) {}
 
     bool is_valid(const rvjit::conversion::op_t &op) const override {
+        if (op.dst.is_scalar() && op.src.is_scalar())
+            return rv64::conversion::extend_t::is_valid(op);
         return select_(op) != 0;
     }
 
     void emit(const rvjit::conversion::op_t &op,
             const rvjit::conversion::args_t &args) const override {
+        if (op.dst.is_scalar() && op.src.is_scalar()) {
+            rv64::conversion::extend_t::emit(op, args);
+            return;
+        }
         const int sel = select_(op);
         CHECK_OR_RET(sel != 0, , "invalid descriptor");
         CHECK_OR_RET(all_valid(op.dst, op.src) && args.named(), ,

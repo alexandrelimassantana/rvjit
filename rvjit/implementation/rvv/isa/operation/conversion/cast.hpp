@@ -36,8 +36,9 @@ namespace conversion {
 ///     scalars to `rv64::conversion::cast_t`; both round as the dynamic
 ///     rounding mode says
 ///
-/// @note Vectors convert f16, f32 or f64 at one width; a scalar and a vector
-///     operand are never mixed
+/// @note Vectors convert f16, f32 or f64 at one width; scalars follow
+///     `rv64::conversion::cast_t`; a scalar and a vector operand are never
+///     mixed
 ///
 /// @pre On vector forms, the caller must issue `vsetvli` prior to calling
 ///     this expression with the operands' SEW and LMUL

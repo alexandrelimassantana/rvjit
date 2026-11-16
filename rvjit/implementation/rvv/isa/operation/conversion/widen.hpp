@@ -17,6 +17,7 @@
 #ifndef RVJIT_IMPLEMENTATION_RVV_ISA_OPERATION_CONVERSION_WIDEN_HPP
 #define RVJIT_IMPLEMENTATION_RVV_ISA_OPERATION_CONVERSION_WIDEN_HPP
 
+#include "rvjit/implementation/rv64/isa/operation/conversion/widen.hpp"
 #include "rvjit/implementation/rv64/isa_traits.hpp"
 #include "rvjit/interface/isa/operand.hpp"
 #include "rvjit/interface/isa/operation/conversion.hpp"
@@ -28,33 +29,43 @@ namespace rvjit {
 namespace rvv {
 namespace conversion {
 
-/// Vector conversion into a type twice as wide
+/// Conversion into a type twice as wide, extending the RV64 scalar integer
+/// widening with vector-to-vector conversions
 ///
 /// @details Dispatches to `vfwcvt_f_f_v` (f16 to f32, f32 to f64),
 ///     `vfwcvtbf16_f_f_v` (bf16 to f32), and `vwadd_vx` / `vwaddu_vx` of the
 ///     zero register on integers, which extend the sign or the zero bits
 ///
-/// @note Only vector-to-vector conversions are valid: RV64 has no scalar
-///     widening to extend
+/// @note Scalar-to-scalar conversions are left to `rv64::conversion::widen_t`,
+///     which widens integers only, under its conditions; mixed forms are
+///     invalid
 ///
-/// @pre The caller must issue `vsetvli` prior to calling this expression and
-///     the `vtype` must be configured using the source's SEW and LMUL
-/// @pre `dst` is not `src`: the source group is the highest-numbered part of
-///     the destination group, or does not overlap it
-struct widen_t : public rvjit::conversion::expression_impl_t {
+/// @pre The caller must issue `vsetvli` prior to calling a vector form of
+///     this expression and the `vtype` must be configured using the source's
+///     SEW and LMUL
+/// @pre On vector forms, `dst` is not `src`: the source group is the
+///     highest-numbered part of the destination group, or does not overlap it
+struct widen_t : public rv64::conversion::widen_t {
     static constexpr const char *NAME = "rvjit::rvv::conversion::widen";
 
     /// Creates the component
     ///
     /// @param e The emitter instructions are emitted through
-    explicit widen_t(rvjit::emitter_t e) : e_(e) {}
+    explicit widen_t(rvjit::emitter_t e)
+        : rv64::conversion::widen_t(e), e_(e) {}
 
     bool is_valid(const rvjit::conversion::op_t &op) const override {
+        if (op.dst.is_scalar() && op.src.is_scalar())
+            return rv64::conversion::widen_t::is_valid(op);
         return select_(op) != sel_t::none;
     }
 
     void emit(const rvjit::conversion::op_t &op,
             const rvjit::conversion::args_t &args) const override {
+        if (op.dst.is_scalar() && op.src.is_scalar()) {
+            rv64::conversion::widen_t::emit(op, args);
+            return;
+        }
         const sel_t sel = select_(op);
         CHECK_OR_RET(sel != sel_t::none, , "invalid descriptor");
         CHECK_OR_RET(all_valid(op.dst, op.src) && args.named(), ,

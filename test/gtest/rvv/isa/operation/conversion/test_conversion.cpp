@@ -237,7 +237,8 @@ TEST(extend_cast_valid, shapes) {
     EXPECT_FALSE(cast(type_t::f32, type_t::f32));
 }
 
-/// Scalar forms are RV64's: only the cast is valid; mixed forms never are
+/// Scalar forms are RV64's: widen, extend and cast are valid; mixed forms
+/// never are
 TEST(conversion_valid, scalar_forms_follow_rv64) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
@@ -248,13 +249,20 @@ TEST(conversion_valid, scalar_forms_follow_rv64) {
 
     EXPECT_FALSE(cv.narrow(sca, type_t::f16, type_t::f32).is_valid());
     EXPECT_FALSE(cv.widen(sca, type_t::f32, type_t::f16).is_valid());
-    EXPECT_FALSE(cv.extend(sca, type_t::s32, type_t::s8).is_valid());
+    EXPECT_TRUE(cv.widen(sca, type_t::s32, type_t::s16).is_valid());
+    EXPECT_TRUE(cv.extend(sca, type_t::s32, type_t::s8).is_valid());
     EXPECT_TRUE(cv.cast(sca, type_t::f32, type_t::s32).is_valid());
     EXPECT_TRUE(cv.cast(sca, type_t::f32, type_t::s64).is_valid());
     EXPECT_FALSE(cv.cast(sca, type_t::f32, type_t::s16).is_valid());
 
     const op_t mixed(operand_t(vec, type_t::f32), operand_t(sca, type_t::s32));
     EXPECT_FALSE(cv.cast(mixed).is_valid());
+    const op_t mixed_ext(
+            operand_t(vec, type_t::s32), operand_t(sca, type_t::s8));
+    EXPECT_FALSE(cv.extend(mixed_ext).is_valid());
+    const op_t mixed_wide(
+            operand_t(vec, type_t::s32), operand_t(sca, type_t::s16));
+    EXPECT_FALSE(cv.widen(mixed_wide).is_valid());
 }
 
 /// An invalid conversion emits nothing
