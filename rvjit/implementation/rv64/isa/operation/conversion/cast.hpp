@@ -33,8 +33,7 @@ namespace conversion {
 /// @details Dispatches to the `fcvt` of the f16, f32 or f64 and the 32- or
 ///     64-bit integer, rounding as the dynamic rounding mode says
 ///
-/// @note Only scalar-to-scalar conversions are valid; the unsigned integer is
-///     u32, as rvjit has no u64
+/// @note Only scalar-to-scalar conversions are valid
 struct cast_t : public rvjit::conversion::expression_impl_t {
     static constexpr const char *NAME = "rvjit::rv64::conversion::cast";
 
@@ -69,26 +68,26 @@ struct cast_t : public rvjit::conversion::expression_impl_t {
             const FReg fd(args.dst);
             const Reg rs(args.src);
             if (fw == 2)
-                wide ? e_->fcvt_h_l(fd, rs)
+                wide ? (sgn ? e_->fcvt_h_l(fd, rs) : e_->fcvt_h_lu(fd, rs))
                      : (sgn ? e_->fcvt_h_w(fd, rs) : e_->fcvt_h_wu(fd, rs));
             else if (fw == 4)
-                wide ? e_->fcvt_s_l(fd, rs)
+                wide ? (sgn ? e_->fcvt_s_l(fd, rs) : e_->fcvt_s_lu(fd, rs))
                      : (sgn ? e_->fcvt_s_w(fd, rs) : e_->fcvt_s_wu(fd, rs));
             else
-                wide ? e_->fcvt_d_l(fd, rs)
+                wide ? (sgn ? e_->fcvt_d_l(fd, rs) : e_->fcvt_d_lu(fd, rs))
                      : (sgn ? e_->fcvt_d_w(fd, rs) : e_->fcvt_d_wu(fd, rs));
             return;
         }
         const Reg rd(args.dst);
         const FReg fs(args.src);
         if (fw == 2)
-            wide ? e_->fcvt_l_h(rd, fs)
+            wide ? (sgn ? e_->fcvt_l_h(rd, fs) : e_->fcvt_lu_h(rd, fs))
                  : (sgn ? e_->fcvt_w_h(rd, fs) : e_->fcvt_wu_h(rd, fs));
         else if (fw == 4)
-            wide ? e_->fcvt_l_s(rd, fs)
+            wide ? (sgn ? e_->fcvt_l_s(rd, fs) : e_->fcvt_lu_s(rd, fs))
                  : (sgn ? e_->fcvt_w_s(rd, fs) : e_->fcvt_wu_s(rd, fs));
         else
-            wide ? e_->fcvt_l_d(rd, fs)
+            wide ? (sgn ? e_->fcvt_l_d(rd, fs) : e_->fcvt_lu_d(rd, fs))
                  : (sgn ? e_->fcvt_w_d(rd, fs) : e_->fcvt_wu_d(rd, fs));
     }
 
