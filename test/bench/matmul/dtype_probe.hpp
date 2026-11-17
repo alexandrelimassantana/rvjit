@@ -41,7 +41,7 @@ inline void on_sigill(int) {
 struct probe_kernel_t : public Xbyak_riscv::CodeGenerator {
     explicit probe_kernel_t(bool bf16) : Xbyak_riscv::CodeGenerator(4096) {
         using namespace Xbyak_riscv;
-        vsetvli(x0, x0, SEW::e16, LMUL::m1);
+        vsetvli(x0, x0, SEW::e16, LMUL::m1, VTA::tu, VMA::mu);
         flh(ft0, sp, 0);
         if (bf16)
             vfwmaccbf16_vv(v2, v0, v1);
