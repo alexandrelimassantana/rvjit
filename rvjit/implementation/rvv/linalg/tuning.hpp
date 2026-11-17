@@ -70,6 +70,17 @@ struct tuning_t {
         has_lmul_ = true;
     }
 
+    /// The largest input LMUL the model's own choice reaches
+    ///
+    /// @details The smallest group that spans 2048 bits, m8 when the vector
+    ///     registers are too short for any
+    LMUL max_lmul() const {
+        for (LMUL m : {LMUL::m1, LMUL::m2, LMUL::m4}) {
+            if (model_.vlenb * 8 * vgroup_size(m) >= vlong_bits_) return m;
+        }
+        return LMUL::m8;
+    }
+
     /// The vector registers only inputs may draw, keeping `v0` (the mask
     /// register) away from accumulators and epilogue values
     static rvjit::buffer::buffer_t reserved_vectors() {
@@ -94,14 +105,14 @@ struct tuning_t {
     ///
     /// @param p The plan
     ///
-    /// @details The input group is the model's preference, widened when a
-    ///     conversion of `p` runs at a width too narrow to keep the
-    ///     accumulators' vector length in a whole register group, and
-    ///     narrowed while a bounded M fits the half group, unless the LMUL is
-    ///     forced
+    /// @details The input group starts at m4 (m2 when widening) capped at
+    ///     `max_lmul()`, widened when a conversion of `p` runs at a width too
+    ///     narrow to keep the accumulators' vector length in a whole register
+    ///     group, and narrowed while a bounded M fits the half group, unless
+    ///     the LMUL is forced
     ///
     /// @note Does not retry against a smaller LMUL when the derived
-    ///     accumulator LMUL would exceed the model's max_lmul; `vtype_t`
+    ///     accumulator LMUL would exceed `max_lmul()`; `vtype_t`
     ///     does not validate this, so an unsupported combination is on
     ///     the caller to avoid
     vtype_t vtype_of(const rvjit::linalg::matmul::plan_t &p) const {
@@ -226,8 +237,8 @@ struct tuning_t {
         const bool one_spare = vt.is_mixed() || vt.lmulo == LMUL::m8;
         const int ceiling = std::min(out_groups - (one_spare ? 1 : 2),
                 out_groups - epilogue_groups(1));
-        // Long vectors (VLEN >= 2048 bits) take at most 8 accumulators
-        const int nb_max = model_.vlenb * 8 >= 2048 ? 8 : 16;
+        // Long vectors take at most 8 accumulators
+        const int nb_max = model_.vlenb * 8 >= vlong_bits_ ? 8 : 16;
         const int max_acc = std::min(nb_max, std::max(1, ceiling));
         CHECK(p.blocks.nb <= max_acc,
                 "a pinned N block of %d beyond the accumulator ceiling %d",
@@ -277,11 +288,15 @@ struct tuning_t {
     }
 
 private:
-    /// The input LMUL: the forced one, else the model's preference capped
+    // Vector length (bits) from which an LMUL group and the N block are capped
+    static constexpr int vlong_bits_ = 2048;
+
+    /// The input LMUL: the forced one, else m4 (m2 widening) capped
     LMUL input_lmul_(bool widening) const {
         if (has_lmul_) return lmul_;
         const LMUL m = widening ? LMUL::m2 : LMUL::m4;
-        return is_lmul_gte(m, model_.max_lmul) ? model_.max_lmul : m;
+        const LMUL cap = max_lmul();
+        return is_lmul_gte(m, cap) ? cap : m;
     }
 
     /// Whether the accumulators of `dta` x `dtc` fit a group of at most m8

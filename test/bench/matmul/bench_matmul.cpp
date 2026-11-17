@@ -751,9 +751,10 @@ int main(int argc, char **argv) {
             // at the LMUL the backend will use (4, or 2 widening, unless
             // forced or capped)
             const int default_group = c.is_widening() ? 2 : 4;
-            const int64_t group = c.lmul > 0
-                    ? c.lmul
-                    : std::min(default_group, vgroup_size(model.max_lmul));
+            const rvjit::rvv::linalg::matmul::tuning_t tuning(model);
+            const int cap = vgroup_size(tuning.max_lmul());
+            const int64_t group
+                    = c.lmul > 0 ? c.lmul : std::min(default_group, cap);
             const int64_t vl = model.vlenb * group / dtype_bytes(c.areg());
             const auto eval = [&](const std::string &e) {
                 const int64_t v = eval_vl_expr(e, vl);

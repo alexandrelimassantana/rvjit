@@ -25,19 +25,19 @@ namespace rvv {
 
 /// Expected vector latency is vlenb/vlaneb when the vector lane width is set
 TEST(vpu, vector_latency_divides) {
-    const vpu_t vpu(64, 16, LMUL::m8, LMUL::m1, 0, 0, 0);
+    const vpu_t vpu(64, 16, 0, 0, 0);
     EXPECT_EQ(vpu.vector_latency(), 4);
 }
 
 /// Expected vector latency is zero when the vector length is not set
 TEST(vpu, vector_latency_without_vector_lanes) {
-    const vpu_t vpu(64, 0, LMUL::m8, LMUL::m1, 0, 0, 0);
+    const vpu_t vpu(64, 0, 0, 0, 0);
     EXPECT_EQ(vpu.vector_latency(), 1);
 }
 
 /// Expected memory latency forwards informed values
 TEST(vpu, memory_latency) {
-    const vpu_t vpu(64, 16, LMUL::m8, LMUL::m1, 32768, 64, 5);
+    const vpu_t vpu(64, 16, 32768, 64, 5);
     EXPECT_EQ(vpu.vector_latency(), 4);
     EXPECT_EQ(vpu.memory_latency(), 5);
 }
