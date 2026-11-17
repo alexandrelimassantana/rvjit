@@ -204,6 +204,21 @@ TEST_F(tuning_test_t, long_vectors_cap_the_n_block) {
     }
 }
 
+/// The largest LMUL is the smallest group spanning 2048 bits, m8 below that
+TEST_F(tuning_test_t, max_lmul_is_the_smallest_group_spanning_2048_bits) {
+    const struct {
+        int vlen;
+        LMUL expected;
+    } cases[] = {{128, LMUL::m8}, {256, LMUL::m8}, {512, LMUL::m4},
+            {1024, LMUL::m2}, {2048, LMUL::m1}, {4096, LMUL::m1}};
+    for (const auto &c : cases) {
+        rvv::vpu_t model;
+        model.from_params(c.vlen, 32768, 64, 4);
+        EXPECT_TRUE(tuning_t(model).max_lmul() == c.expected)
+                << "vlen=" << c.vlen;
+    }
+}
+
 /// A widening plan narrows its input group and keeps the 2x accumulators
 TEST_F(tuning_test_t, a_short_m_narrows_a_widening_group) {
     plan_t p = f32_plan(size_parameter_t::less_eq(a3, F32_VL / 2),

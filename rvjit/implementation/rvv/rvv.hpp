@@ -111,8 +111,6 @@ inline int get_maximum_vector_length(const int vlenb, const SEW &sew = SEW::e8,
 struct vpu_t {
     int vlenb = 0;
     int vlaneb = 0;
-    LMUL max_lmul = LMUL::m8;
-    LMUL lmul_preference = LMUL::m1;
 
     // Cache level feeding the vector loads/stores (not necessarily L1)
     int cache_size = 0;
@@ -126,17 +124,13 @@ struct vpu_t {
     ///
     /// @param vlenb The vector register length in bytes
     /// @param vlaneb The vector lane width in bytes
-    /// @param max_lmul The largest LMUL setting worth using
-    /// @param lmul_preference The LMUL setting used unless forced
     /// @param cache_size The size of the cache level feeding the vector unit
     /// @param cache_line_size The line size of that cache level
     /// @param cache_latency The latency of that cache level
-    vpu_t(int vlenb, int vlaneb, LMUL max_lmul, LMUL lmul_preference,
-            int cache_size, int cache_line_size, int cache_latency)
+    vpu_t(int vlenb, int vlaneb, int cache_size, int cache_line_size,
+            int cache_latency)
         : vlenb(vlenb)
         , vlaneb(vlaneb)
-        , max_lmul(max_lmul)
-        , lmul_preference(lmul_preference)
         , cache_size(cache_size)
         , cache_line_size(cache_line_size)
         , cache_latency(cache_latency) {}
@@ -158,9 +152,6 @@ struct vpu_t {
     ///     obtained; this method performs no hardware querying of its own
     virtual void from_params(
             int vlen, int cache_size, int cache_line_size, int cache_latency) {
-        // Long vector architecture vlen
-        static constexpr int vlong = 2048;
-
         // Vector architectural storage
         vlenb = vlen / 8;
 
@@ -168,25 +159,6 @@ struct vpu_t {
         // pipelined 64-bit SIMD unit, mid ones widen to control latency,
         // and long ones match the cache-line size.
         vlaneb = vlen <= 256 ? 8 : vlen <= 1024 ? 16 : cache_line_size;
-
-        // Empirical observation: limit vector grouping to reach 2048 bits
-        max_lmul = LMUL::m8;
-        for (LMUL m : {LMUL::m1, LMUL::m2, LMUL::m4, LMUL::m8}) {
-            if (vlen * vgroup_size(m) >= vlong) {
-                max_lmul = m;
-                break;
-            }
-        }
-
-        // Set a preferred LMUL setting with enough registers to mask latency
-        lmul_preference = LMUL::m1;
-        const int lat = vlaneb > 0 ? vlenb / vlaneb : 0;
-        for (LMUL m : {LMUL::m4, LMUL::m2, LMUL::m1}) {
-            if (is_lmul_gte(max_lmul, m) && lat <= get_nvgroups(m)) {
-                lmul_preference = m;
-                break;
-            }
-        }
 
         this->cache_size = cache_size;
         this->cache_line_size = cache_line_size;
