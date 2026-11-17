@@ -26,7 +26,7 @@ jobs:
         run: .github/automation/clang-format.sh
 
   build-and-test:
-    name: RV64 build & test (gcc-14)
+    name: RV64 build & test (gcc-14, C++11)
     runs-on: ubuntu-24.04
     # The runner's qemu-user (8.2) SIGILLs on Zvfh/Zvfbfwma; 26.04's runs them.
     container:

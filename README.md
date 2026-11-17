@@ -267,7 +267,8 @@ exercises every option. Interface:
 
 The library itself needs no build; the build produces the test suite and the
 benchmarks. It requires CMake 3.14 or later and, on hosts other than RISC-V, a
-RISC-V cross-compiler and QEMU:
+RISC-V cross-compiler and QEMU. The library, its tests and the CI build as
+C++11:
 
 ```bash
 sudo apt install g++-14-riscv64-linux-gnu qemu-user
