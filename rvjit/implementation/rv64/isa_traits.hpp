@@ -24,6 +24,13 @@
 #define XBYAK_RISCV_V 1
 #endif
 
+// Every vsetvli rvjit emits names its LMUL, VTA and VMA, so it opts out of
+// Xbyak_riscv's legacy defaults for them (the value Xbyak_riscv announces as
+// its future default) whatever the host includes first
+#ifndef XBYAK_RISCV_VSETV_DEFAULT_OLD
+#define XBYAK_RISCV_VSETV_DEFAULT_OLD 0
+#endif
+
 #include "xbyak_riscv/xbyak_riscv.hpp"
 
 #include "rvjit/interface/isa/isa_traits.hpp"

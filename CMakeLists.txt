@@ -29,7 +29,8 @@ target_include_directories(rvjit INTERFACE
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-target_compile_definitions(rvjit INTERFACE XBYAK_RISCV_V=1)
+target_compile_definitions(rvjit INTERFACE
+    XBYAK_RISCV_V=1 XBYAK_RISCV_VSETV_DEFAULT_OLD=0)
 if(RVJIT_DEBUG)
     target_compile_definitions(rvjit INTERFACE RVJIT_DEBUG)
 endif()
