@@ -7,7 +7,10 @@ option(RVJIT_BUILD_BENCH "Build the rvjit component benchmarks/examples" ON)
 option(RVJIT_DEBUG "Enable rvjit DEBUG developer traces on failure" ON)
 option(RVJIT_BUILD_DOCS "Build the rvjit Doxygen API documentation" OFF)
 
-set(CMAKE_CXX_STANDARD 11)
+# C++11 unless the caller chooses a standard
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 11)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

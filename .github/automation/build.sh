@@ -27,7 +27,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 build=${1:-build}
 shift $(($# > 0))
 
-args=(-DCMAKE_BUILD_TYPE=RelWithDebInfo)
+args=(-DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_STANDARD=11
+    -DCMAKE_CXX_EXTENSIONS=OFF)
 if [ "$(uname -m)" != riscv64 ]; then
     sysroot=${QEMU_LD_PREFIX:-/usr/riscv64-linux-gnu}
     args+=(-DCMAKE_TOOLCHAIN_FILE="$root/cmake/toolchains/riscv64.cmake"
