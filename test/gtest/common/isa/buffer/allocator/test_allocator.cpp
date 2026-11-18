@@ -164,13 +164,51 @@ TEST(buffer_allocator_group, single_view_fallback) {
         EXPECT_EQ(acc.id(i), inp.id(i)) << "mismatch at i=" << i;
 }
 
-// configure(in_gs, out_gs): out_gs must be >= in_gs
+// configure(in_gs, out_gs): an input group may be larger than the output's,
+// leaving room beside the data it holds
 
-/// An output group smaller than the input one is rejected
-TEST(buffer_allocator_group, configure_rejects_smaller_output_group) {
+/// An input group larger than the output one groups its own view, and the
+/// two views share the occupancy
+TEST(buffer_allocator_group, configure_takes_a_larger_input_group) {
+    auto g = make_group(4, 2);
+    EXPECT_EQ(g.group_size(buffer::allocation_t::input), 4);
+    EXPECT_EQ(g.group_size(buffer::allocation_t::output), 2);
+    EXPECT_EQ(g.available(buffer::allocation_t::input), 8);
+    EXPECT_EQ(g.available(buffer::allocation_t::output), 16);
+
+    const buffer::buffer_t in = g.pop(1, buffer::allocation_t::input);
+    ASSERT_EQ(in.size(), 1);
+    EXPECT_EQ(in.id(0), 0);
+    // The input took v0..v3: two output groups are gone
+    EXPECT_EQ(g.available(buffer::allocation_t::output), 14);
+    EXPECT_EQ(g.pop(buffer::allocation_t::output), 4);
+}
+
+/// An empty group size is rejected
+TEST(buffer_allocator_group, configure_rejects_an_empty_group) {
     buffer::allocator::group_t g;
-    ASSERT_FALSE(g.configure(buffer::buffer_t::from_mask(~0u), 4, 2));
-    EXPECT_EQ(g.available(), 0);
+    ASSERT_FALSE(g.configure(buffer::buffer_t::from_mask(~0u), 0, 2));
+}
+
+/// Scratch buffers may group wider than the outputs, keeping the outputs' and
+/// the inputs' views
+TEST(buffer_allocator_group, configure_groups_scratch_wider) {
+    buffer::allocator::group_t g;
+    ASSERT_TRUE(g.configure(buffer::buffer_t::from_mask(~0u),
+            buffer::order_t {}, 2, 2, buffer::buffer_t(), 4));
+    EXPECT_EQ(g.group_size(buffer::allocation_t::scratch), 4);
+    EXPECT_EQ(g.group_size(buffer::allocation_t::output), 2);
+    EXPECT_EQ(g.group_size(buffer::allocation_t::input), 2);
+    EXPECT_EQ(g.available(buffer::allocation_t::scratch), 8);
+
+    EXPECT_EQ(g.pop(buffer::allocation_t::output), 0);
+    // v0..v1 taken: the first whole scratch group starts at v4
+    EXPECT_EQ(g.pop(buffer::allocation_t::scratch), 4);
+
+    // Narrower than the outputs is rejected
+    buffer::allocator::group_t h;
+    EXPECT_FALSE(h.configure(buffer::buffer_t::from_mask(~0u),
+            buffer::order_t {}, 2, 4, buffer::buffer_t(), 2));
 }
 
 /// may_reserve() sums `out + in` against one shared budget

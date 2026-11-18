@@ -46,11 +46,16 @@ struct pool_checkpoint_t {
 /// How the vector register file is grouped for a kernel
 ///
 /// @details `in` and `out` are the input and output buffer group sizes, and
-///     `input_only` holds the registers only inputs may draw
+///     `input_only` holds the registers only inputs may draw. `scratch` is the
+///     group size of scratch buffers when it differs from `out`, 0 otherwise
+///
+/// @note An input or scratch group larger than the data it holds leaves room
+///     for a narrow value beside it, e.g. one a widening must not overlap
 struct vector_layout_t {
     int in = 1;
     int out = 1;
     buffer_t input_only;
+    int scratch = 0;
 
     vector_layout_t() = default;
 
@@ -59,11 +64,16 @@ struct vector_layout_t {
     /// @param in The input register group size
     /// @param out The output register group size
     /// @param input_only The registers only inputs may draw
-    vector_layout_t(int in, int out, const buffer_t &input_only = buffer_t())
-        : in(in), out(out), input_only(input_only) {}
+    /// @param scratch The scratch register group size, 0 for `out`
+    vector_layout_t(int in, int out, const buffer_t &input_only = buffer_t(),
+            int scratch = 0)
+        : in(in), out(out), input_only(input_only), scratch(scratch) {}
 
-    /// Whether the groups are realizable: positive, outputs no smaller
-    bool is_valid() const { return in >= 1 && out >= in; }
+    /// Whether the groups are realizable: positive, scratch no smaller than
+    /// the outputs
+    bool is_valid() const {
+        return in >= 1 && out >= 1 && (scratch == 0 || scratch >= out);
+    }
 };
 
 /// Pool with mutable state encapsulating buffer allocation expressions
@@ -222,15 +232,17 @@ struct buffer_pool_t : public uses_transactions_t<pool_checkpoint_t> {
     /// @param in The input buffer group size
     /// @param out The output buffer group size
     /// @param input_only The registers only input allocations may draw
+    /// @param scratch The scratch buffer group size, 0 for `out`
     ///
     /// @note Input allocations draw `input_only` first and outputs never do
     ///
-    /// @pre `out >= in`
+    /// @pre `scratch` is 0 or no smaller than `out`
     virtual void set_vector_group_size(
-            int in, int out, const buffer_t &input_only = {}) {
+            int in, int out, const buffer_t &input_only = {}, int scratch = 0) {
         (void)in;
         (void)out;
         (void)input_only;
+        (void)scratch;
         LOG_FAIL(__func__, "unimplemented");
     }
 
@@ -242,12 +254,15 @@ struct buffer_pool_t : public uses_transactions_t<pool_checkpoint_t> {
     bool configure_vectors(const vector_layout_t &layout) {
         CHECK(open_transactions() == 0,
                 "the vector layout changed inside a transaction");
-        CHECK(layout.is_valid(), "an invalid vector layout (in %d, out %d)",
-                layout.in, layout.out);
-        if (layout.in == layout.out && layout.input_only.is_empty())
+        CHECK(layout.is_valid(),
+                "an invalid vector layout (in %d, out %d, scratch %d)",
+                layout.in, layout.out, layout.scratch);
+        if (layout.in == layout.out && layout.input_only.is_empty()
+                && layout.scratch == 0)
             set_vector_group_size(layout.in);
         else
-            set_vector_group_size(layout.in, layout.out, layout.input_only);
+            set_vector_group_size(
+                    layout.in, layout.out, layout.input_only, layout.scratch);
         return true;
     }
 
@@ -292,9 +307,10 @@ struct buffer_compose_t : public buffer_pool_t {
         vec_.configure(vector_source_, vector_order_, gs, gs);
     }
 
-    void set_vector_group_size(
-            int in, int out, const buffer_t &input_only = {}) override {
-        vec_.configure(vector_source_, vector_order_, in, out, input_only);
+    void set_vector_group_size(int in, int out, const buffer_t &input_only = {},
+            int scratch = 0) override {
+        vec_.configure(
+                vector_source_, vector_order_, in, out, input_only, scratch);
     }
 
 protected:
