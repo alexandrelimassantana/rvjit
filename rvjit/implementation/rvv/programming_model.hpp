@@ -141,10 +141,13 @@ struct programming_model_t
     ///
     /// @param sew The element width switched to
     ///
-    /// @details The LMUL scales the output's by the ratio of the widths
+    /// @details The LMUL scales the output's by the ratio of the widths. A
+    ///     narrower width than a whole register takes the fractional LMUL,
+    ///     which keeps the SEW/LMUL ratio, and so the vector length, of the
+    ///     output configuration
     ///
-    /// @note Returns false, emitting nothing, when that LMUL is fractional or
-    ///     beyond m8
+    /// @note Fails, emitting nothing, when that LMUL is beyond m8 or below
+    ///     the SEW/ELEN floor of a 64-bit ELEN
     bool set_vtype_keep_vl(SEW sew) const {
         LMUL lmul = LMUL::m1;
         CHECK(keep_vl_lmul(vtype, sew, lmul),

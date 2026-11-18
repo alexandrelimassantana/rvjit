@@ -51,3 +51,15 @@
 --reset
 --dt=f32 --post=bias --bias_dt=bf16,f16 --bias_kind=per_m,scalar
 2v+3x5x9_n"typed_bias"
+
+# Conversions taking a fraction of a register: from a VLEN of 1024 bits, s8
+# data and an s8 C take half a register of an s32 m2 group, and from 2048 bits
+# so does f16. Below 1024 bits the same cases keep whole groups
+--reset
+--dt=f32:f32:f16 --acc=f32 --post=none,beta,alpha+beta+bias --bias_dt=f16
+--scalar=runtime --shape=literal --transA=0,1
+17x5x9_n"fractional_f16"
+--reset
+--dt=s8:s8:s8 --areg=s32 --breg=s32 --acc=s32 --epi=f32
+--post=beta,alpha+beta+bias --alpha=0.37 --shape=literal,runtime
+2v+3x7x33_n"fractional_s8_c"

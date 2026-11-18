@@ -39,13 +39,24 @@ inline SEW sew_for(const type_t &dt) {
     }
 }
 
-/// Obtains an LMUL representation for an integer group size parameter
+/// Obtains the LMUL of a group of `num / den` registers, whole or fractional
 ///
-/// @param group_size The number of registers in a group
+/// @param num The number of registers in a group, or the numerator of a
+///     fraction of one
+/// @param den The denominator of the register count
 ///
-/// @note Defaults to m1 for group sizes other than 2, 4, and 8
-inline LMUL lmul_for(const int group_size) {
-    switch (group_size) {
+/// @note Defaults to m1 for counts other than 1/8 up to 8 in powers of two
+inline LMUL lmul_for(const int num, const int den = 1) {
+    if (num <= 0 || den <= 0) return LMUL::m1;
+    if (num < den) {
+        switch (den / num) {
+            case 2: return LMUL::mf2;
+            case 4: return LMUL::mf4;
+            case 8: return LMUL::mf8;
+            default: return LMUL::m1;
+        }
+    }
+    switch (num / den) {
         case 1: return LMUL::m1;
         case 2: return LMUL::m2;
         case 4: return LMUL::m4;
@@ -90,21 +101,25 @@ inline int sewb(const SEW &s) {
 
 /// Obtains the LMUL representation for a base LMUL and in/out SEW settings
 ///
-/// @param base The LMUL setting of the input
+/// @param base The LMUL setting of the input, whole or fractional
 /// @param in The SEW setting of the input
 /// @param out The SEW setting of the output
+///
+/// @details Scales the group by the ratio of the widths, so that both settings
+///     hold the same number of elements
 inline LMUL lmul_for(LMUL base, SEW in, SEW out) {
-    return lmul_for(vgroup_size(base) * (sewb(out) / sewb(in)));
+    return lmul_for(
+            vgroup_size(base) * sewb(out), lmul_fraction(base) * sewb(in));
 }
 
 /// Computes the maximum vector length given a certain vector type settings
 ///
 /// @param vlenb The vector register length in bytes
 /// @param sew The SEW setting
-/// @param lmul The LMUL setting
+/// @param lmul The LMUL setting, whole or fractional
 inline int get_maximum_vector_length(const int vlenb, const SEW &sew = SEW::e8,
         const LMUL &lmul = LMUL::m1) {
-    return vlenb * vgroup_size(lmul) / sewb(sew);
+    return vlenb * vgroup_size(lmul) / lmul_fraction(lmul) / sewb(sew);
 }
 
 /// Hardware model driving arithmetic micro-kernel unrolling decisions
@@ -227,17 +242,23 @@ struct vtype_t {
 /// @param sew The element width switched to
 /// @param lmul The LMUL found
 ///
-/// @details The LMUL scales the output's by the ratio of the widths
+/// @details The LMUL scales the output's by the ratio of the widths. A width
+///     narrower than a whole register takes the fractional LMUL, which keeps
+///     the SEW/LMUL ratio, and so the vector length, of the output
+///     configuration
 ///
-/// @note Returns false, leaving `lmul` alone, when that LMUL is fractional or
-///     beyond m8
+/// @note Returns false, leaving `lmul` alone, when that LMUL is beyond m8 or
+///     below the SEW/ELEN floor of a 64-bit ELEN
 inline bool keep_vl_lmul(const vtype_t &vt, SEW sew, LMUL &lmul) {
-    const int group = vgroup_size(vt.lmulo);
-    const int from = sewb(vt.sewo), to = sewb(sew);
-    const int scaled = to >= from ? group * (to / from) : group / (from / to);
-    const bool whole = to >= from || group % (from / to) == 0;
-    if (scaled < 1 || scaled > 8 || !whole) return false;
-    lmul = lmul_for(scaled);
+    const int num = vgroup_size(vt.lmulo) * sewb(sew);
+    const int den = lmul_fraction(vt.lmulo) * sewb(vt.sewo);
+    const bool whole = num >= den;
+    const int scaled = whole ? num / den : den / num;
+    static constexpr int elen_bytes = 8;
+    const bool fits = (num % den == 0 || den % num == 0)
+            && (whole ? scaled <= 8 : scaled * sewb(sew) <= elen_bytes);
+    if (!fits) return false;
+    lmul = lmul_for(num, den);
     return true;
 }
 
