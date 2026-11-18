@@ -76,15 +76,20 @@ struct allocator_t {
     /// @param ins The input buffer group size
     /// @param outs The output buffer group size
     ///
-    /// @details One occupancy view is kept when `ins == outs`; otherwise
-    ///     input and output use two filtered views sharing the occupancy
-    ///
     /// @param input_only Registers only input allocations may draw, and are
     ///     drawn first by them
+    /// @param scratch The scratch buffer group size, 0 for `outs`
     ///
-    /// @pre `outs` must be `>= ins` since narrowing is not implemented
+    /// @details One occupancy view is kept when `ins == outs`, with no
+    ///     input-only registers and no scratch size of its own; otherwise
+    ///     inputs, outputs and scratch buffers use filtered views sharing the
+    ///     occupancy. An input or scratch group larger than the outputs' leaves
+    ///     room beside the data it holds, e.g. for a narrow value a widening
+    ///     into it must not overlap
+    ///
+    /// @pre `scratch` is 0 or no smaller than `outs`
     virtual bool configure(const buffer_t &src, const order_t &order, int ins,
-            int outs, const buffer_t &input_only)
+            int outs, const buffer_t &input_only, int scratch)
             = 0;
 
     /// Configures the allocator handing out `src` in the order `order`
@@ -95,7 +100,7 @@ struct allocator_t {
     /// @param outs The output buffer group size
     bool configure(const buffer_t &src, const order_t &order, int ins = 1,
             int outs = 1) {
-        return configure(src, order, ins, outs, buffer_t {});
+        return configure(src, order, ins, outs, buffer_t {}, 0);
     }
 
     /// Configures the allocator handing out `src` in ascending name order
@@ -104,7 +109,7 @@ struct allocator_t {
     /// @param ins The input buffer group size
     /// @param outs The output buffer group size
     bool configure(const buffer_t &src, int ins = 1, int outs = 1) {
-        return configure(src, order_t {}, ins, outs, buffer_t {});
+        return configure(src, order_t {}, ins, outs, buffer_t {}, 0);
     }
 
     /// Allocates a single buffer id

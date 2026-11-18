@@ -40,8 +40,9 @@ struct named_t : rvjit::buffer::allocator_t {
     using rvjit::buffer::allocator_t::configure;
 
     bool configure(const buffer_t &source, const order_t &order, int in_gs,
-            int out_gs, const buffer_t &input_only) override {
-        CHECK(in_gs == 1 && out_gs == 1, "requires in_gs == 1 && out_gs == 1");
+            int out_gs, const buffer_t &input_only, int scratch) override {
+        CHECK(in_gs == 1 && out_gs == 1 && (scratch == 0 || scratch == 1),
+                "requires group sizes of 1");
         CHECK(input_only.is_empty(), "no input-only registers on this kind");
         candidates_ = source.ordered(order);
         candidate_set_ = buffer_t(candidates_);

@@ -44,10 +44,11 @@ struct group_t : rvjit::buffer::allocator_t {
     using rvjit::buffer::allocator_t::configure;
 
     bool configure(const buffer_t &source, const order_t &order, int in_gs,
-            int out_gs, const buffer_t &input_only) override {
-        if (in_gs != out_gs)
-            CHECK_OR_RET(out_gs >= in_gs, false,
-                    "unimplemented support for narrowing kernels");
+            int out_gs, const buffer_t &input_only, int scratch) override {
+        CHECK_OR_RET(in_gs >= 1 && out_gs >= 1, false, "an empty group size");
+        CHECK_OR_RET(scratch == 0 || scratch >= out_gs, false,
+                "a scratch group smaller than the output's");
+        const int scratch_gs = scratch == 0 ? out_gs : scratch;
 
         const resource_t served = resource_;
         *this = group_t();
@@ -55,15 +56,18 @@ struct group_t : rvjit::buffer::allocator_t {
         in_group_size_ = in_gs;
         const order_t ordered = source.ordered(order);
         in_names_ = filter_valid_groups_(ordered, in_gs, input_only, true);
-        if (in_gs == out_gs && input_only.is_empty()) return true;
+        if (in_gs == out_gs && input_only.is_empty() && scratch_gs == out_gs)
+            return true;
 
         is_mixed_ = true;
         out_group_size_ = out_gs;
         out_names_ = filter_valid_groups_(ordered, out_gs, input_only, false);
-        scratch_names_ = out_names_;
+        scratch_group_size_ = scratch_gs;
+        scratch_names_
+                = filter_valid_groups_(ordered, scratch_gs, input_only, false);
         for (int i = 0; i < ordered.size(); ++i)
-            if (ordered[i] % out_gs == 0
-                    && holds_any_(ordered[i], out_gs, input_only))
+            if (ordered[i] % scratch_gs == 0
+                    && holds_any_(ordered[i], scratch_gs, input_only))
                 scratch_names_.push_back(ordered[i]);
         return true;
     }
@@ -105,8 +109,10 @@ private:
     order_t out_names_;
     int out_group_size_ = 1;
 
-    // The output groups followed by the ones holding input-only registers
+    // The scratch groups no input-only register is in, followed by the ones
+    // holding input-only registers
     order_t scratch_names_;
+    int scratch_group_size_ = 1;
 
     bool is_mixed_ = false;
 
@@ -116,8 +122,9 @@ private:
     }
 
     int group_size_(allocation_t kind) const {
-        return kind == allocation_t::input || !is_mixed_ ? in_group_size_
-                                                         : out_group_size_;
+        if (kind == allocation_t::input || !is_mixed_) return in_group_size_;
+        return kind == allocation_t::output ? out_group_size_
+                                            : scratch_group_size_;
     }
 
     /// Whether the group of `gsize` registers from `first` holds any of `regs`
