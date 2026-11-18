@@ -50,8 +50,9 @@ TEST(rv64_typecast, rejects_unimplemented_steps) {
     EXPECT_FALSE(tc.configure(conversion::op_t(type_t::s8, type_t::f32, sca)));
 }
 
-/// A 2x integer widening plans one widen step
-TEST(rv64_typecast, widens_integers) {
+/// A 2x integer widening plans one extend step, as the scalar extension
+/// accepts a doubling
+TEST(rv64_typecast, extends_integers) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
     rv64::conversion::conversion_t cv(env.e);
@@ -59,7 +60,7 @@ TEST(rv64_typecast, widens_integers) {
     const conversion::op_t op(type_t::s32, type_t::s16, form_t::scalar);
     ASSERT_TRUE(tc.configure(op));
     ASSERT_EQ(tc.nsteps(), 1);
-    EXPECT_EQ(tc.step(0).kind, typecast::typecast_t::step_t::widen);
+    EXPECT_EQ(tc.step(0).kind, typecast::typecast_t::step_t::extend);
 }
 
 /// Vector operands are rejected: every RV64 step is scalar-to-scalar

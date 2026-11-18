@@ -31,7 +31,8 @@ namespace typecast {
 /// @details `configure` plans a chain of conversion steps, each one
 ///     expression of a conversion dialect, and validates every step against
 ///     it. A widening chain changes width at most once, in its first step,
-///     and then converts in place; a narrowing one converts in place first and
+///     and then converts in place; an integer growth is an extension at every
+///     ratio, a doubling included; a narrowing one converts in place first and
 ///     then halves its width in place, step by step. Intermediate operands
 ///     take the destination's form
 ///
@@ -276,11 +277,11 @@ private:
             return true;
         }
 
-        // Integers grow once, by a widening when doubling, as it reads at the
-        // narrow width, else by an extension; they shrink by halves
+        // Integers grow once, by an extension, which runs in the destination's
+        // configuration as the steps around it do; they shrink by halves
         if (fi && ti) {
             if (wt > wf) {
-                push_(wt == 2 * wf ? step_t::widen : step_t::extend, from, to);
+                push_(step_t::extend, from, to);
                 return true;
             }
             const bool sign = is_signed_int(from);
