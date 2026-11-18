@@ -67,7 +67,8 @@ TEST(typecast_configure, steps) {
     EXPECT_EQ(kinds(type_t::f32, type_t::f32), "");
     EXPECT_EQ(kinds(type_t::f16, type_t::f32), "W");
     EXPECT_EQ(kinds(type_t::f32, type_t::bf16), "N");
-    EXPECT_EQ(kinds(type_t::s16, type_t::s32), "W");
+    EXPECT_EQ(kinds(type_t::s16, type_t::s32), "E");
+    EXPECT_EQ(kinds(type_t::u8, type_t::s16), "E");
     EXPECT_EQ(kinds(type_t::s8, type_t::s32), "E");
     EXPECT_EQ(kinds(type_t::s32, type_t::f32), "C");
     EXPECT_EQ(kinds(type_t::u8, type_t::f32), "EC");
@@ -78,7 +79,7 @@ TEST(typecast_configure, steps) {
     EXPECT_EQ(kinds(type_t::s32, type_t::u8), "-");
     EXPECT_EQ(kinds(type_t::s32, type_t::u32), "-");
     EXPECT_EQ(kinds(type_t::u64, type_t::f64), "C");
-    EXPECT_EQ(kinds(type_t::u32, type_t::u64), "W");
+    EXPECT_EQ(kinds(type_t::u32, type_t::u64), "E");
     EXPECT_EQ(kinds(type_t::s64, type_t::u64), "-");
     EXPECT_EQ(kinds(type_t::u8, type_t::s8), "-");
     EXPECT_EQ(kinds(type_t::s32, type_t::f16), "-");
