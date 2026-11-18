@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -531,8 +532,8 @@ bool tune_at(int vlen, const plan_t &p, tuned_t &out,
 
 } // namespace
 
-/// At VLEN 1024 (m2 cap) an s8 conversion takes half a register beside its
-/// s32 m2 group, instead of lifting the group to m4
+/// At VLEN 1024 (m2 cap) a conversion from s8 takes half a register beside the
+/// m2 group it widens into, instead of lifting the group to m4
 TEST(tuning_lmul_cap, a_1024_bit_machine_keeps_s8_at_m2) {
     tuned_t t;
     rvjit::buffer::vector_layout_t layout;
@@ -543,13 +544,16 @@ TEST(tuning_lmul_cap, a_1024_bit_machine_keeps_s8_at_m2) {
     EXPECT_EQ(t.nb, 14);
     EXPECT_EQ(layout.in, 2);
 
-    // s8 at e32/m2 takes half a register: a whole register beside each A group
+    // s8 data widens from s16 registers, e16/m1 into e32/m2; the s8 takes
+    // half a register, a whole register beside each m1 input group
     ASSERT_TRUE(tune_at(1024, typed_plan(s8_in, type_t::s32), t, layout));
+    EXPECT_TRUE(t.vtype.sewi == SEW::e16);
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::m1);
     EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
     EXPECT_EQ(t.m_grain, 64);
-    EXPECT_EQ(layout.in, 4);
+    EXPECT_EQ(layout.in, 2);
     EXPECT_EQ(layout.out, 2);
-    EXPECT_EQ(t.nb, 12); // A's two buffers span four m2 groups
+    EXPECT_EQ(t.nb, 14); // A's two buffers span two m2 groups
 }
 
 /// Below 1024 bits the cap leaves room for whole groups: no conversion takes a
@@ -557,11 +561,13 @@ TEST(tuning_lmul_cap, a_1024_bit_machine_keeps_s8_at_m2) {
 TEST(tuning_lmul_cap, a_512_bit_machine_keeps_whole_groups) {
     tuned_t t;
     rvjit::buffer::vector_layout_t layout;
+    // s8 widens from e16/m2 into e32/m4, the s8 in the upper register
     ASSERT_TRUE(tune_at(512, typed_plan(s8_in, type_t::s32), t, layout));
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::m2);
     EXPECT_TRUE(t.vtype.lmulo == LMUL::m4);
-    EXPECT_EQ(layout.in, 4);
+    EXPECT_EQ(layout.in, 2);
     EXPECT_EQ(layout.scratch, 0);
-    EXPECT_EQ(t.nb, 6);
+    EXPECT_EQ(t.nb, 7);
 
     ASSERT_TRUE(tune_at(512, typed_plan(type_t::f16, type_t::f32), t, layout));
     EXPECT_TRUE(t.vtype.lmuli == LMUL::m2);
@@ -647,14 +653,15 @@ TEST(tuning_lmul_cap, a_1024_bit_machine_widens_f16_into_m2) {
     EXPECT_EQ(t.nb, 15); // sixteen m2 groups, one for A's buffers
 }
 
-/// At VLEN 2048 (m1 cap) s8 takes a quarter register and a widening a
-/// fractional input LMUL
+/// At VLEN 2048 (m1 cap) a widening takes a fractional input LMUL, and s8
+/// data a quarter register beside its s16 input
 TEST(tuning_lmul_cap, a_2048_bit_machine_takes_fractions) {
     tuned_t t;
     rvjit::buffer::vector_layout_t layout;
     ASSERT_TRUE(tune_at(2048, typed_plan(s8_in, type_t::s32), t, layout));
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::mf2);
     EXPECT_TRUE(t.vtype.lmulo == LMUL::m1);
-    EXPECT_EQ(layout.in, 4);
+    EXPECT_EQ(layout.in, 2);
     EXPECT_EQ(t.nb, 8);
 
     ASSERT_TRUE(tune_at(2048, typed_plan(type_t::f16, type_t::f32), t, layout));
@@ -669,11 +676,117 @@ TEST(tuning_lmul_cap, a_2048_bit_machine_takes_fractions) {
 TEST(tuning_lmul_cap, a_conversion_that_cannot_be_whole_is_best_effort) {
     tuned_t t;
     rvjit::buffer::vector_layout_t layout;
+    // s8 data into s64 widens from s32 registers, e32/m1 into e64/m2: the s8
+    // takes 256 bits at the m2 cap
     const type_parameter_t s8_wide(type_t::s8, type_t::s64);
     ASSERT_TRUE(tune_at(1024, typed_plan(s8_wide, type_t::s64), t, layout));
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::m1);
     EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
-    EXPECT_EQ(layout.in, 8); // an eighth of the m2 group in the eighth register
-    EXPECT_EQ(t.nb, 8);
+    EXPECT_EQ(layout.in, 4); // a quarter of the m1 group in the fourth register
+    EXPECT_EQ(t.nb, 12);
+}
+
+namespace {
+
+// A plan of `a` x `b` into `c`, each of a memory and a register type
+plan_t int_plan(type_t a_mem, type_t b_mem, type_t reg) {
+    plan_t p = typed_plan(type_parameter_t(a_mem, reg), reg);
+    p.dtb = type_parameter_t(b_mem, reg);
+    return p;
+}
+
+} // namespace
+
+/// Integer data at most half as wide as the accumulators is multiplied at
+/// half their width, by a widening multiply-accumulate
+TEST(tuning_widening, integer_data_widens_to_half_the_accumulator) {
+    const tuning_t tuning(machine_of(256));
+
+    const plan_t s8 = tuning.backend_plan(
+            int_plan(type_t::s8, type_t::s8, type_t::s32));
+    EXPECT_TRUE(s8.dta.reg == type_t::s16);
+    EXPECT_TRUE(s8.dtb.reg == type_t::s16);
+    EXPECT_TRUE(s8.dtc.reg == type_t::s32);
+    EXPECT_TRUE(s8.dta.mem == type_t::s8);
+
+    // Each operand keeps its memory type's signedness
+    const plan_t u8 = tuning.backend_plan(
+            int_plan(type_t::u8, type_t::u8, type_t::s32));
+    EXPECT_TRUE(u8.dta.reg == type_t::u16);
+    EXPECT_TRUE(u8.dtb.reg == type_t::u16);
+    const plan_t mixed = tuning.backend_plan(
+            int_plan(type_t::s8, type_t::u8, type_t::s32));
+    EXPECT_TRUE(mixed.dta.reg == type_t::s16);
+    EXPECT_TRUE(mixed.dtb.reg == type_t::u16);
+
+    // s16 data takes no extension; s16 accumulators take s8 registers; s64
+    // accumulators take s32 registers
+    EXPECT_TRUE(
+            tuning.backend_plan(int_plan(type_t::s16, type_t::s16, type_t::s32))
+                    .dta.reg
+            == type_t::s16);
+    EXPECT_TRUE(
+            tuning.backend_plan(int_plan(type_t::s8, type_t::s8, type_t::s16))
+                    .dta.reg
+            == type_t::s8);
+    EXPECT_TRUE(
+            tuning.backend_plan(int_plan(type_t::s8, type_t::s8, type_t::s64))
+                    .dta.reg
+            == type_t::s32);
+
+    // The rule is idempotent
+    const plan_t again = tuning.backend_plan(s8);
+    EXPECT_TRUE(again.dta.reg == type_t::s16);
+    EXPECT_TRUE(again.dtb.reg == type_t::s16);
+
+    // Data as wide as half the accumulators or wider, floats, a widening plan
+    // and a forced LMUL are run as they are
+    EXPECT_TRUE(
+            tuning.backend_plan(int_plan(type_t::s32, type_t::s32, type_t::s32))
+                    .dta.reg
+            == type_t::s32);
+    EXPECT_TRUE(
+            tuning.backend_plan(int_plan(type_t::s8, type_t::s16, type_t::s16))
+                    .dtb.reg
+            == type_t::s16);
+    EXPECT_TRUE(tuning.backend_plan(typed_plan(type_parameter_t(type_t::f16,
+                                                       type_t::f32),
+                                            type_t::f32))
+                        .dta.reg
+            == type_t::f32);
+    tuning_t forced(machine_of(256));
+    forced.set_lmul(LMUL::m4);
+    EXPECT_TRUE(
+            forced.backend_plan(int_plan(type_t::s8, type_t::s8, type_t::s32))
+                    .dta.reg
+            == type_t::s32);
+}
+
+/// Widened s8 takes e16 inputs into e32 accumulators at every VLEN
+TEST(tuning_widening, s8_blocks_at_each_vlen) {
+    struct want_t {
+        int vlen;
+        LMUL lmuli, lmulo;
+        int m_grain, nb;
+    };
+    const want_t wants[] = {{128, LMUL::m2, LMUL::m4, 16, 7},
+            {256, LMUL::m2, LMUL::m4, 32, 7},
+            {1024, LMUL::m1, LMUL::m2, 64, 14}};
+    for (const want_t &w : wants) {
+        for (type_t b : {type_t::s8, type_t::u8}) {
+            tuned_t t;
+            rvjit::buffer::vector_layout_t layout;
+            ASSERT_TRUE(tune_at(
+                    w.vlen, int_plan(type_t::s8, b, type_t::s32), t, layout))
+                    << "vlen=" << w.vlen;
+            EXPECT_TRUE(t.vtype.sewi == SEW::e16) << "vlen=" << w.vlen;
+            EXPECT_TRUE(t.vtype.sewo == SEW::e32) << "vlen=" << w.vlen;
+            EXPECT_TRUE(t.vtype.lmuli == w.lmuli) << "vlen=" << w.vlen;
+            EXPECT_TRUE(t.vtype.lmulo == w.lmulo) << "vlen=" << w.vlen;
+            EXPECT_EQ(t.m_grain, w.m_grain) << "vlen=" << w.vlen;
+            EXPECT_EQ(t.nb, w.nb) << "vlen=" << w.vlen;
+        }
+    }
 }
 
 /// The kernel at a long VLEN uses the blocks the tuning returned
@@ -689,10 +802,18 @@ TEST(tuning_agreement, a_long_vector_kernel_uses_the_tuned_blocks) {
     for (const auto &t : types)
         for (const auto &m : ms)
             plans.push_back(typed_plan(t[0], t[1], m));
+    // Widened integer data of each signedness
+    for (const auto &ab : {std::make_pair(type_t::u8, type_t::u8),
+                 std::make_pair(type_t::s8, type_t::u8),
+                 std::make_pair(type_t::u8, type_t::s8)})
+        plans.push_back(int_plan(ab.first, ab.second, type_t::s32));
     for (int vlen : {1024, 2048}) {
-        for (plan_t p : plans) {
+        for (size_t i = 0; i < plans.size(); ++i) {
+            plan_t p = plans[i];
             const int all_flags[] = {0, linalg::matmul::with_beta};
             for (int flags : all_flags) {
+                SCOPED_TRACE(testing::Message() << "vlen=" << vlen << " plan="
+                                                << i << " flags=" << flags);
                 p.flags = flags;
                 p.beta = p.dta.reg == type_t::s32
                         ? scalar_parameter_t(1.0)
