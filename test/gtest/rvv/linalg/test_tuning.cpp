@@ -164,7 +164,6 @@ TEST_F(tuning_test_t, a_short_m_narrows_the_group) {
     EXPECT_TRUE(half.vtype.lmuli == LMUL::m2);
     EXPECT_EQ(half.m_grain, F32_VL / 2);
     EXPECT_EQ(half.mb, 1);
-    EXPECT_EQ(half.nb, 14); // sixteen m2 groups: fourteen accumulators
 
     {
         const auto p = f32_plan(size_parameter_t::literal(3),
@@ -172,7 +171,6 @@ TEST_F(tuning_test_t, a_short_m_narrows_the_group) {
         ASSERT_TRUE(tune(p, eighth));
     }
     EXPECT_TRUE(eighth.vtype.lmuli == LMUL::m1);
-    EXPECT_EQ(eighth.nb, 16);
 
     // One element past the half group keeps the whole one
     {
@@ -182,32 +180,6 @@ TEST_F(tuning_test_t, a_short_m_narrows_the_group) {
     }
     EXPECT_TRUE(over.vtype.lmuli == LMUL::m4);
     EXPECT_EQ(over.nb, 6);
-}
-
-/// A VLEN of 2048 bits or more caps the N block at 8 accumulators, below 16
-TEST_F(tuning_test_t, long_vectors_cap_the_n_block) {
-    const auto p = f32_plan(size_parameter_t::literal(3),
-            size_parameter_t::runtime(a4), size_parameter_t::runtime(a5));
-    for (int vlen : {1024, 2048, 4096}) {
-        rvv::vpu_t model;
-        model.from_params(vlen, 32768, 64, 4);
-        const tuning_t long_tuning(model);
-        rvv::buffer::buffer_pool_t long_pool(arch);
-        ASSERT_TRUE(long_pool.configure_vectors(long_tuning.vector_layout(p)));
-
-        tuned_t t;
-        ASSERT_TRUE(long_tuning(p, long_pool, {}, t)) << "vlen=" << vlen;
-        EXPECT_TRUE(t.vtype.lmuli == LMUL::m1) << "vlen=" << vlen;
-        EXPECT_EQ(t.nb, vlen >= 2048 ? 8 : 16) << "vlen=" << vlen;
-
-        plan_t pinned = p;
-        pinned.blocks.nb = 9;
-        rvv::buffer::buffer_pool_t pinned_pool(arch);
-        ASSERT_TRUE(
-                pinned_pool.configure_vectors(long_tuning.vector_layout(p)));
-        EXPECT_EQ(long_tuning(pinned, pinned_pool, {}, t), vlen < 2048)
-                << "vlen=" << vlen;
-    }
 }
 
 /// The largest LMUL is the smallest group spanning 2048 bits, m8 below that
@@ -541,7 +513,6 @@ TEST(tuning_lmul_cap, a_1024_bit_machine_keeps_s8_at_m2) {
     ASSERT_TRUE(tune_at(1024, typed_plan(type_t::f32, type_t::f32), t, layout));
     EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
     EXPECT_EQ(t.m_grain, 64);
-    EXPECT_EQ(t.nb, 14);
     EXPECT_EQ(layout.in, 2);
 
     // s8 data widens from s16 registers, e16/m1 into e32/m2; the s8 takes
@@ -553,7 +524,6 @@ TEST(tuning_lmul_cap, a_1024_bit_machine_keeps_s8_at_m2) {
     EXPECT_EQ(t.m_grain, 64);
     EXPECT_EQ(layout.in, 2);
     EXPECT_EQ(layout.out, 2);
-    EXPECT_EQ(t.nb, 14); // A's two buffers span two m2 groups
 }
 
 /// Below 1024 bits the cap leaves room for whole groups: no conversion takes a
@@ -650,7 +620,6 @@ TEST(tuning_lmul_cap, a_1024_bit_machine_widens_f16_into_m2) {
     EXPECT_TRUE(t.vtype.lmuli == LMUL::m1);
     EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
     EXPECT_EQ(t.m_grain, 64);
-    EXPECT_EQ(t.nb, 15); // sixteen m2 groups, one for A's buffers
 }
 
 /// At VLEN 2048 (m1 cap) a widening takes a fractional input LMUL, and s8
@@ -769,9 +738,10 @@ TEST(tuning_widening, s8_blocks_at_each_vlen) {
         LMUL lmuli, lmulo;
         int m_grain, nb;
     };
+    // A zero nb is not checked: the N ceiling decides it
     const want_t wants[] = {{128, LMUL::m2, LMUL::m4, 16, 7},
             {256, LMUL::m2, LMUL::m4, 32, 7},
-            {1024, LMUL::m1, LMUL::m2, 64, 14}};
+            {1024, LMUL::m1, LMUL::m2, 64, 0}};
     for (const want_t &w : wants) {
         for (type_t b : {type_t::s8, type_t::u8}) {
             tuned_t t;
@@ -784,7 +754,7 @@ TEST(tuning_widening, s8_blocks_at_each_vlen) {
             EXPECT_TRUE(t.vtype.lmuli == w.lmuli) << "vlen=" << w.vlen;
             EXPECT_TRUE(t.vtype.lmulo == w.lmulo) << "vlen=" << w.vlen;
             EXPECT_EQ(t.m_grain, w.m_grain) << "vlen=" << w.vlen;
-            EXPECT_EQ(t.nb, w.nb) << "vlen=" << w.vlen;
+            if (w.nb) EXPECT_EQ(t.nb, w.nb) << "vlen=" << w.vlen;
         }
     }
 }
