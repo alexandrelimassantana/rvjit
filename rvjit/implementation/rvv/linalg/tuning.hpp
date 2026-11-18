@@ -216,11 +216,11 @@ struct tuning_t {
     ///
     /// @note Returns false, logging the reason, when the plan has no valid
     ///     decision. The accumulators take the groups the pipeline leaves, at
-    ///     most 16, or 8 from a VLEN of 2048 bits; the epilogue reuses the
-    ///     input groups, `v0`'s included unless it needs the mask, and only a
-    ///     minimum that does not fit shrinks them. An unpinned M takes at most
-    ///     `mb_max` vectors, and is unrolled only when the integer registers
-    ///     left after the epilogue's reach `m_unroll_min_ints`
+    ///     most `nb_ceiling_` of them; the epilogue reuses the input groups,
+    ///     `v0`'s included unless it needs the mask, and only a minimum that
+    ///     does not fit shrinks them. An unpinned M takes at most `mb_max`
+    ///     vectors, and is unrolled only when the integer registers left after
+    ///     the epilogue's reach `m_unroll_min_ints`
     bool operator()(const rvjit::linalg::matmul::plan_t &given,
             rvjit::buffer::buffer_pool_t &pool,
             const std::function<rvjit::linalg::matmul::needs_t(int)> &epilogue,
@@ -301,9 +301,7 @@ struct tuning_t {
                 : (2 * layout.in + group - 1) / group;
         const int ceiling
                 = std::min(out_groups - spare, out_groups - epilogue_groups(1));
-        // Long vectors take at most 8 accumulators
-        const int nb_max = model_.vlenb * 8 >= vlong_bits_ ? 8 : 16;
-        const int max_acc = std::min(nb_max, std::max(1, ceiling));
+        const int max_acc = std::min(nb_ceiling_(p), std::max(1, ceiling));
         CHECK(p.blocks.nb <= max_acc,
                 "a pinned N block of %d beyond the accumulator ceiling %d",
                 p.blocks.nb, max_acc);
@@ -412,6 +410,33 @@ private:
         else
             vt.for_mixed(sewi, sewo, lmul_for(g, ratio));
         return vt;
+    }
+
+    /// The most N columns (accumulator groups) a tile of `p` unrolls
+    ///
+    /// @param p The plan
+    ///
+    /// @details A non-transposed B reads one scalar from each of its N rows,
+    ///     `ldb` bytes apart, per K step. When `ldb` is a multiple of a large
+    ///     power of two, those rows fall in the same cache sets, and more of
+    ///     them than the cache's ways evict each other: on a 1024-bit A100,
+    ///     14 rows at a stride with a power-of-two factor of 4 KiB run at a
+    ///     third of their rate or below, where 6 or 7 rows lose no more than
+    ///     the shape costs anyway. The tile then takes at most
+    ///     `nb_max_aliased` columns, as it does when `ldb` is only known at
+    ///     run time; otherwise `nb_max`, or `nb_max_aliased` from a VLEN of
+    ///     2048 bits
+    int nb_ceiling_(const rvjit::linalg::matmul::plan_t &p) const {
+        static constexpr int nb_max = 12, nb_max_aliased = 8;
+        // The largest power-of-two factor of `ldb`, in bytes, B's rows are
+        // read at without aliasing
+        static constexpr int aliased_ldb_factor = 2048;
+        if (model_.vlenb * 8 >= vlong_bits_) return nb_max_aliased;
+        if (p.is_transb) return nb_max;
+        if (!p.ldb.is_literal()) return nb_max_aliased;
+        const int ldb = p.ldb.value();
+        const int pow2 = ldb & -ldb;
+        return pow2 > aliased_ldb_factor ? nb_max_aliased : nb_max;
     }
 
     /// Whether the accumulators of `dta` x `dtc` fit a group of at most m8
