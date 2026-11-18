@@ -36,6 +36,7 @@
 #include "rvjit/interface/isa/variable.hpp"
 #include "rvjit/interface/linalg/matmul/epilogue.hpp"
 #include "rvjit/interface/linalg/matmul/impl.hpp"
+#include "rvjit/interface/linalg/matmul/lowering.hpp"
 #include "rvjit/interface/linalg/matmul/plan.hpp"
 #include "rvjit/interface/linalg/matmul/strides.hpp"
 #include "rvjit/interface/loop/frame.hpp"
@@ -87,10 +88,28 @@ struct matmul_t {
         , pm_(impl.model())
         , epilogue_(pm_, pm_.streams().memory_operand(), plan_) {}
 
-    /// Resolves `p` and returns whether or not the component succeeded
+    /// Resolves `given` and returns whether or not the component succeeded
     ///
-    /// @param p The plan
-    bool init(const plan_t &p) {
+    /// @param given The plan, run as `impl_t::backend_plan(given)`
+    ///
+    /// @note Fails when the implementation's plan is not a lowering of
+    ///     `given` (`lowering_error`) or is not stable when lowered again
+    bool init(const plan_t &given) {
+        // The backend may run the plan with other register types, e.g. a
+        // widening multiply-accumulate for narrow integer data
+        const plan_t lowered = impl_.backend_plan(given);
+        const char *why = lowering_error(given, lowered);
+        CHECK(!why, "an invalid backend plan: %s", why);
+        const plan_t again = impl_.backend_plan(lowered);
+        CHECK(!lowering_error(lowered, again) && again.dta == lowered.dta
+                        && again.dtb == lowered.dtb,
+                "a backend plan that changes when lowered again");
+
+        // Only the operands' register types differ from the given plan
+        plan_t p = given;
+        p.dta.reg = lowered.dta.reg;
+        p.dtb.reg = lowered.dtb.reg;
+
         // The epilogue's register needs bound the accumulators the backend
         // picks
         plan_ = p;

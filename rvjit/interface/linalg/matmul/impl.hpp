@@ -105,6 +105,19 @@ struct impl_t {
     /// Work-units covered by one dispatch of the largest K unrolling
     int k_tile() const { return k_grain * kb; }
 
+    /// The plan as this implementation runs it, e.g. with operands held in
+    /// other register types than asked for
+    ///
+    /// @param p The plan
+    ///
+    /// @note `matmul_t` runs the plan returned, from `configure()` on, and
+    ///     fails `init` unless it is a lowering of `p` (`lowering_error`: only
+    ///     A's and B's register types differ, each holding its memory type's
+    ///     values) and returns itself unchanged when given back. The
+    ///     implementation guarantees the accumulation computes what `p` asks
+    ///     for
+    virtual plan_t backend_plan(const plan_t &p) const { return p; }
+
     /// Prepares the pool's register classes to run `p`, e.g. their grouping
     ///
     /// @param p The plan
