@@ -90,22 +90,66 @@ struct tuning_t {
         return rvjit::buffer::buffer_t(&v0, 1);
     }
 
-    /// How the vector register file must be grouped to run `p`
+    /// The plan as this backend runs it
     ///
     /// @param p The plan
+    ///
+    /// @details Integer data at most half as wide as integer accumulators of
+    ///     its registers' type is multiplied at half their width, by a widening
+    ///     multiply-accumulate (`vwmacc`, `vwmaccu`, `vwmaccsu`, `vwmaccus`):
+    ///     A's and B's registers take the type of half the accumulators'
+    ///     width their memory type widens to (`natural_wide`). s8 or u8 data
+    ///     into s32 accumulators is thus extended to s16 or u16, not s32; into
+    ///     s16 accumulators it is used as it is. Every other plan, and any
+    ///     plan under a forced LMUL, is returned as it is
+    ///
+    /// @note Idempotent: the plan returned no longer accumulates uniformly
+    rvjit::linalg::matmul::plan_t backend_plan(
+            const rvjit::linalg::matmul::plan_t &p) const {
+        const rvjit::type_t acc = p.dtc.reg;
+        if (has_lmul_ || !rvjit::is_int(acc) || p.dta.reg != acc
+                || p.dtb.reg != acc)
+            return p;
+        const int half = rvjit::sewb(acc) / 2;
+        const auto narrow_int = [&](rvjit::type_t mem) {
+            return rvjit::is_int(mem) && rvjit::sewb(mem) <= half;
+        };
+        if (half < 1 || !narrow_int(p.dta.mem) || !narrow_int(p.dtb.mem))
+            return p;
+        const auto widened = [&](rvjit::type_t mem) {
+            rvjit::type_t t = mem;
+            while (t != rvjit::type_t::none && rvjit::sewb(t) < half)
+                t = rvjit::natural_wide(t);
+            return t;
+        };
+        const rvjit::type_t a = widened(p.dta.mem), b = widened(p.dtb.mem);
+        if (a == rvjit::type_t::none || b == rvjit::type_t::none) return p;
+        rvjit::linalg::matmul::plan_t q = p;
+        q.dta.reg = a;
+        q.dtb.reg = b;
+        return q;
+    }
+
+    /// How the vector register file must be grouped to run `given`
+    ///
+    /// @param given The plan, run as `backend_plan(given)`
     ///
     /// @details The input groups (A's pipeline buffers) and the scratch groups
     ///     (the epilogue's C and bias buffers) are the accumulator groups,
     ///     unless a value is loaded narrower than the type it is widened to
     ///     and takes a fraction of a register: it may not overlap the group
-    ///     it is widened into, so the buffer takes room beside it
+    ///     it is widened into, so the buffer takes room beside it. The
+    ///     epilogue reuses A's buffers once the K loop is done, so they also
+    ///     take the size of a scratch buffer larger than the accumulator
+    ///     group, leaving it one aligned buffer to draw
     ///
     /// @note An invalid layout is returned when the plan has none
     rvjit::buffer::vector_layout_t vector_layout(
-            const rvjit::linalg::matmul::plan_t &p) const {
+            const rvjit::linalg::matmul::plan_t &given) const {
         using namespace rvjit::linalg::matmul;
+        const plan_t p = backend_plan(given);
         if (!accumulator_lmul_fits_(p.dta.reg, p.dtc.reg)) return {0, 0, {}};
-        const vtype_t vt = vtype_of(p);
+        const vtype_t vt = vtype_of_(p);
         const int out = vgroup_size(vt.lmulo);
 
         // The registers of a buffer a value `ratio` times narrower widens
@@ -134,12 +178,14 @@ struct tuning_t {
         if (p.flags & with_beta) widen(p.dtc.mem);
         if (p.flags & with_bias) widen(p.bias_type());
 
+        if (scratch > out) in = std::max(in, scratch);
+
         return {in, out, reserved_vectors(), scratch == out ? 0 : scratch};
     }
 
-    /// The SEW and LMUL pair `p`'s data types run at
+    /// The SEW and LMUL pair `given`'s data types run at
     ///
-    /// @param p The plan
+    /// @param given The plan, run as `backend_plan(given)`
     ///
     /// @details Unless the LMUL is forced, the accumulator group is the
     ///     preference (m4, or m2 inputs widened) within `max_lmul()`. Every
@@ -154,83 +200,40 @@ struct tuning_t {
     ///     where they take the fraction of one register it leaves them
     ///
     /// @note No group exceeds `max_lmul()` unless the LMUL is forced
-    vtype_t vtype_of(const rvjit::linalg::matmul::plan_t &p) const {
-        const rvjit::type_t dta = p.dta.reg, dtc = p.dtc.reg;
-        const SEW sewi = sew_for(dta);
-        const SEW sewo = sew_for(dtc);
-
-        vtype_t vt;
-        if (has_lmul_) {
-            if (dta == dtc)
-                vt.for_uniform(sewo, lmul_);
-            else
-                vt.for_mixed(sewi, sewo, lmul_);
-            return vt;
-        }
-
-        // The accumulator group, in registers: the preference within the cap
-        const int wo = rvjit::sewb(dtc);
-        const int ratio = std::max(1, wo / rvjit::sewb(dta));
-        const int cap = vgroup_size(max_lmul());
-        static constexpr int uniform_group = 4, widening_input_group = 2;
-        int g = std::min(
-                dta == dtc ? uniform_group : widening_input_group * ratio, cap);
-
-        // Whether every conversion takes whole registers of a group of `n`
-        const auto whole = [&](int n) {
-            const auto fits = [&](rvjit::type_t t) {
-                const int to = rvjit::sewb(t);
-                return to >= wo || n * to % wo == 0;
-            };
-            return fits(p.dtc.mem) && fits(p.epi_type()) && fits(p.dta.mem)
-                    && (!(p.flags & rvjit::linalg::matmul::with_bias)
-                            || fits(p.bias_type()));
-        };
-        while (g < cap && !whole(g))
-            g *= 2;
-
-        // A bounded M that half the group still holds leaves lanes idle
-        const int m_bound = p.m.bound();
-        while (m_bound > 0 && g / 2 >= ratio && whole(g / 2)
-                && model_.vlenb * (g / 2) / wo >= m_bound)
-            g /= 2;
-
-        if (dta == dtc)
-            vt.for_uniform(sewo, lmul_for(g));
-        else
-            vt.for_mixed(sewi, sewo, lmul_for(g, ratio));
-        return vt;
+    vtype_t vtype_of(const rvjit::linalg::matmul::plan_t &given) const {
+        return vtype_of_(backend_plan(given));
     }
 
-    /// Decides the vector grouping and the blocks for `p`
+    /// Decides the vector grouping and the blocks for `given`
     ///
-    /// @param p The plan; the blocks in `p.blocks` are honored as they are or
-    ///     the plan is rejected
+    /// @param given The plan, run as `backend_plan(given)`; the blocks in
+    ///     `given.blocks` are honored as they are or the plan is rejected
     /// @param pool The register pool, whose vector file is grouped as
-    ///     `vector_layout(p)` says
+    ///     `vector_layout(given)` says
     /// @param epilogue What the epilogue needs for the given M vectors, nothing
     ///     when empty
     /// @param out The decisions
     ///
     /// @note Returns false, logging the reason, when the plan has no valid
     ///     decision. The accumulators take the groups the pipeline leaves, at
-    ///     most 16, or 8 from a VLEN of 2048 bits; the epilogue reuses the input groups, `v0`'s included unless it needs
-    ///     the mask, and only a minimum that does not fit shrinks them. An
-    ///     unpinned M takes at most `mb_max` vectors, and is unrolled only when
-    ///     the integer registers left after the epilogue's reach
-    ///     `m_unroll_min_ints`
-    bool operator()(const rvjit::linalg::matmul::plan_t &p,
+    ///     most 16, or 8 from a VLEN of 2048 bits; the epilogue reuses the
+    ///     input groups, `v0`'s included unless it needs the mask, and only a
+    ///     minimum that does not fit shrinks them. An unpinned M takes at most
+    ///     `mb_max` vectors, and is unrolled only when the integer registers
+    ///     left after the epilogue's reach `m_unroll_min_ints`
+    bool operator()(const rvjit::linalg::matmul::plan_t &given,
             rvjit::buffer::buffer_pool_t &pool,
             const std::function<rvjit::linalg::matmul::needs_t(int)> &epilogue,
             tuned_t &out) const {
+        const rvjit::linalg::matmul::plan_t p = backend_plan(given);
         CHECK(accumulator_lmul_fits_(p.dta.reg, p.dtc.reg),
                 "an accumulator LMUL beyond m8");
 
         // Configure vtype according to the plan
         out = tuned_t();
-        out.vtype = vtype_of(p);
+        out.vtype = vtype_of_(p);
         const vtype_t &vt = out.vtype;
-        const rvjit::buffer::vector_layout_t layout = vector_layout(p);
+        const rvjit::buffer::vector_layout_t layout = vector_layout(given);
 
         // A forced LMUL runs every conversion at a width whose LMUL, scaled
         // from the accumulators' to keep the vector length, is a whole
@@ -359,6 +362,57 @@ struct tuning_t {
 private:
     // Vector length (bits) from which an LMUL group and the N block are capped
     static constexpr int vlong_bits_ = 2048;
+
+    /// The SEW and LMUL pair `p` runs at, as `vtype_of` describes
+    ///
+    /// @param p The plan, as the backend runs it (`backend_plan`)
+    vtype_t vtype_of_(const rvjit::linalg::matmul::plan_t &p) const {
+        const rvjit::type_t dta = p.dta.reg, dtc = p.dtc.reg;
+        const SEW sewi = sew_for(dta);
+        const SEW sewo = sew_for(dtc);
+
+        vtype_t vt;
+        if (has_lmul_) {
+            if (dta == dtc)
+                vt.for_uniform(sewo, lmul_);
+            else
+                vt.for_mixed(sewi, sewo, lmul_);
+            return vt;
+        }
+
+        // The accumulator group, in registers: the preference within the cap
+        const int wo = rvjit::sewb(dtc);
+        const int ratio = std::max(1, wo / rvjit::sewb(dta));
+        const int cap = vgroup_size(max_lmul());
+        static constexpr int uniform_group = 4, widening_input_group = 2;
+        int g = std::min(
+                dta == dtc ? uniform_group : widening_input_group * ratio, cap);
+
+        // Whether every conversion takes whole registers of a group of `n`
+        const auto whole = [&](int n) {
+            const auto fits = [&](rvjit::type_t t) {
+                const int to = rvjit::sewb(t);
+                return to >= wo || n * to % wo == 0;
+            };
+            return fits(p.dtc.mem) && fits(p.epi_type()) && fits(p.dta.mem)
+                    && (!(p.flags & rvjit::linalg::matmul::with_bias)
+                            || fits(p.bias_type()));
+        };
+        while (g < cap && !whole(g))
+            g *= 2;
+
+        // A bounded M that half the group still holds leaves lanes idle
+        const int m_bound = p.m.bound();
+        while (m_bound > 0 && g / 2 >= ratio && whole(g / 2)
+                && model_.vlenb * (g / 2) / wo >= m_bound)
+            g /= 2;
+
+        if (dta == dtc)
+            vt.for_uniform(sewo, lmul_for(g));
+        else
+            vt.for_mixed(sewi, sewo, lmul_for(g, ratio));
+        return vt;
+    }
 
     /// Whether the accumulators of `dta` x `dtc` fit a group of at most m8
     ///

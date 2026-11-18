@@ -60,6 +60,13 @@ struct impl_t : public rvjit::linalg::matmul::impl_t {
     /// The tuning this implementation decides with
     const tuning_t &tuning() const { return tuning_; }
 
+    /// @details The tuning's `backend_plan`: narrow integer data takes a
+    ///     widening multiply-accumulate
+    rvjit::linalg::matmul::plan_t backend_plan(
+            const rvjit::linalg::matmul::plan_t &p) const override {
+        return tuning_.backend_plan(p);
+    }
+
     /// @details Groups the vector register file as the tuning says
     bool configure(const rvjit::linalg::matmul::plan_t &p) override {
         const auto layout = tuning_.vector_layout(p);
