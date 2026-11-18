@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -39,10 +40,14 @@ namespace {
 constexpr int VLEN = 256;
 constexpr int F32_VL = VLEN / 32 * 4;
 
-rvv::vpu_t machine() {
+rvv::vpu_t machine_of(int vlen) {
     rvv::vpu_t model;
-    model.from_params(VLEN, 32768, 64, 4);
+    model.from_params(vlen, 32768, 64, 4);
     return model;
+}
+
+rvv::vpu_t machine() {
+    return machine_of(VLEN);
 }
 
 plan_t f32_plan(const size_parameter_t &m, const size_parameter_t &n,
@@ -493,6 +498,232 @@ TEST(tuning_agreement, a_kernel_uses_the_blocks_the_tuning_returned) {
             EXPECT_EQ(impl.kb, asked.kb);
             EXPECT_EQ(impl.ktb, asked.ktb);
             EXPECT_EQ(impl.m_grain, asked.m_grain);
+        }
+    }
+}
+
+namespace {
+
+// A runtime M, N and K plan of `a` x `a` into `c`
+plan_t typed_plan(const type_parameter_t &a, const type_parameter_t &c,
+        const size_parameter_t &m = size_parameter_t::runtime(a3)) {
+    plan_t p = f32_plan(
+            m, size_parameter_t::runtime(a4), size_parameter_t::runtime(a5));
+    p.dta = p.dtb = a;
+    p.dtc = c;
+    return p;
+}
+
+const type_parameter_t s8_in(type_t::s8, type_t::s32);
+const type_parameter_t f16_out(type_t::f16, type_t::f32);
+
+// Tunes `p` on a machine of `vlen` bits, returning the layout it grouped by
+bool tune_at(int vlen, const plan_t &p, tuned_t &out,
+        rvjit::buffer::vector_layout_t &layout) {
+    rvv::buffer::architecture_t arch
+            = rvv::buffer::architecture_t::default_list();
+    rvv::buffer::buffer_pool_t pool(arch);
+    const tuning_t tuning(machine_of(vlen));
+    layout = tuning.vector_layout(p);
+    if (!layout.is_valid() || !pool.configure_vectors(layout)) return false;
+    return tuning(p, pool, {}, out);
+}
+
+} // namespace
+
+/// At VLEN 1024 (m2 cap) an s8 conversion takes half a register beside its
+/// s32 m2 group, instead of lifting the group to m4
+TEST(tuning_lmul_cap, a_1024_bit_machine_keeps_s8_at_m2) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+
+    ASSERT_TRUE(tune_at(1024, typed_plan(type_t::f32, type_t::f32), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
+    EXPECT_EQ(t.m_grain, 64);
+    EXPECT_EQ(t.nb, 14);
+    EXPECT_EQ(layout.in, 2);
+
+    // s8 at e32/m2 takes half a register: a whole register beside each A group
+    ASSERT_TRUE(tune_at(1024, typed_plan(s8_in, type_t::s32), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
+    EXPECT_EQ(t.m_grain, 64);
+    EXPECT_EQ(layout.in, 4);
+    EXPECT_EQ(layout.out, 2);
+    EXPECT_EQ(t.nb, 12); // A's two buffers span four m2 groups
+}
+
+/// Below 1024 bits the cap leaves room for whole groups: no conversion takes a
+/// fraction of a register
+TEST(tuning_lmul_cap, a_512_bit_machine_keeps_whole_groups) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    ASSERT_TRUE(tune_at(512, typed_plan(s8_in, type_t::s32), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m4);
+    EXPECT_EQ(layout.in, 4);
+    EXPECT_EQ(layout.scratch, 0);
+    EXPECT_EQ(t.nb, 6);
+
+    ASSERT_TRUE(tune_at(512, typed_plan(type_t::f16, type_t::f32), t, layout));
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::m2);
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m4);
+    EXPECT_EQ(t.nb, 7);
+}
+
+/// A short M narrows the group only while every conversion stays whole
+TEST(tuning_lmul_cap, a_short_m_keeps_conversions_whole) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    const auto short_m = size_parameter_t::less_eq(a3, 32);
+    ASSERT_TRUE(tune_at(
+            1024, typed_plan(type_t::f32, type_t::f32, short_m), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m1);
+
+    // s8 at m1 would take a quarter register, where m2 takes half
+    ASSERT_TRUE(
+            tune_at(1024, typed_plan(s8_in, type_t::s32, short_m), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
+}
+
+/// At VLEN 2048 (m1 cap) an f16 output takes half a register of the f32
+/// group, and its C is widened into a scratch buffer of two registers
+TEST(tuning_lmul_cap, a_2048_bit_machine_widens_an_f16_c_from_half_a_register) {
+    plan_t p = typed_plan(type_t::f32, f16_out);
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    ASSERT_TRUE(tune_at(2048, p, t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m1);
+    EXPECT_EQ(layout.scratch, 0);
+
+    p.flags = linalg::matmul::with_beta;
+    p.beta = scalar_parameter_t(1.0);
+    ASSERT_TRUE(tune_at(2048, p, t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m1);
+    EXPECT_EQ(layout.out, 1);
+    EXPECT_EQ(layout.scratch, 2);
+}
+
+/// A narrow C or bias widened from a fraction of a register takes larger
+/// scratch buffers, which the accumulators make room for
+TEST(tuning_lmul_cap, a_fractional_epilogue_load_takes_larger_scratch) {
+    plan_t p = typed_plan(s8_in, type_parameter_t(type_t::s8, type_t::s32));
+    p.flags = linalg::matmul::with_beta;
+    p.beta = scalar_parameter_t(1.0);
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    ASSERT_TRUE(tune_at(1024, p, t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
+    EXPECT_EQ(layout.scratch, 4);
+}
+
+/// No register group exceeds `max_lmul()`, and the model's choice
+/// is never rejected for its LMUL
+TEST(tuning_lmul_cap, no_group_exceeds_max_lmul) {
+    const plan_t plans[] = {typed_plan(type_t::f32, type_t::f32),
+            typed_plan(type_t::f16, type_t::f32),
+            typed_plan(type_t::bf16, type_t::f32),
+            typed_plan(type_t::f16, f16_out), typed_plan(s8_in, type_t::s32),
+            typed_plan(s8_in, type_parameter_t(type_t::s8, type_t::s32))};
+    for (int vlen : {128, 256, 512, 1024, 2048, 4096}) {
+        const int cap = vgroup_size(tuning_t(machine_of(vlen)).max_lmul());
+        for (const plan_t &p : plans) {
+            tuned_t t;
+            rvjit::buffer::vector_layout_t layout;
+            ASSERT_TRUE(tune_at(vlen, p, t, layout)) << "vlen=" << vlen;
+            EXPECT_LE(vgroup_size(t.vtype.lmuli), cap) << "vlen=" << vlen;
+            EXPECT_LE(vgroup_size(t.vtype.lmulo), cap) << "vlen=" << vlen;
+            EXPECT_EQ(lmul_fraction(t.vtype.lmulo), 1) << "vlen=" << vlen;
+        }
+    }
+}
+
+/// At VLEN 1024 (m2 cap) a widening takes m1 inputs into m2 accumulators
+TEST(tuning_lmul_cap, a_1024_bit_machine_widens_f16_into_m2) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    ASSERT_TRUE(tune_at(1024, typed_plan(type_t::f16, type_t::f32), t, layout));
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::m1);
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
+    EXPECT_EQ(t.m_grain, 64);
+    EXPECT_EQ(t.nb, 15); // sixteen m2 groups, one for A's buffers
+}
+
+/// At VLEN 2048 (m1 cap) s8 takes a quarter register and a widening a
+/// fractional input LMUL
+TEST(tuning_lmul_cap, a_2048_bit_machine_takes_fractions) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    ASSERT_TRUE(tune_at(2048, typed_plan(s8_in, type_t::s32), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m1);
+    EXPECT_EQ(layout.in, 4);
+    EXPECT_EQ(t.nb, 8);
+
+    ASSERT_TRUE(tune_at(2048, typed_plan(type_t::f16, type_t::f32), t, layout));
+    EXPECT_TRUE(t.vtype.lmuli == LMUL::mf2);
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m1);
+    EXPECT_EQ(t.m_grain, 2048 / 32);
+    EXPECT_EQ(layout.in, 1);
+}
+
+/// A conversion that still takes a fraction of a register at `max_lmul` runs
+/// there anyway
+TEST(tuning_lmul_cap, a_conversion_that_cannot_be_whole_is_best_effort) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+    const type_parameter_t s8_wide(type_t::s8, type_t::s64);
+    ASSERT_TRUE(tune_at(1024, typed_plan(s8_wide, type_t::s64), t, layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m2);
+    EXPECT_EQ(layout.in, 8); // an eighth of the m2 group in the eighth register
+    EXPECT_EQ(t.nb, 8);
+}
+
+/// The kernel at a long VLEN uses the blocks the tuning returned
+TEST(tuning_agreement, a_long_vector_kernel_uses_the_tuned_blocks) {
+    const type_parameter_t types[][2]
+            = {{type_t::f32, type_t::f32}, {type_t::f16, type_t::f32},
+                    {type_t::f16, f16_out}, {s8_in, type_t::s32},
+                    {s8_in, type_parameter_t(type_t::s8, type_t::s32)}};
+    // A runtime M unrolls as a large bound; 131 unrolls two tiles at 1024
+    const size_parameter_t ms[] = {size_parameter_t::runtime(a3),
+            size_parameter_t::literal(131), size_parameter_t::less_eq(a3, 64)};
+    std::vector<plan_t> plans;
+    for (const auto &t : types)
+        for (const auto &m : ms)
+            plans.push_back(typed_plan(t[0], t[1], m));
+    for (int vlen : {1024, 2048}) {
+        for (plan_t p : plans) {
+            const int all_flags[] = {0, linalg::matmul::with_beta};
+            for (int flags : all_flags) {
+                p.flags = flags;
+                p.beta = p.dta.reg == type_t::s32
+                        ? scalar_parameter_t(1.0)
+                        : scalar_parameter_t(source_t(a7));
+
+                // Both sides see the same registers: the plan's runtime
+                // values live in a3..a7
+                auto kernel_arch = rvv::buffer::architecture_t::default_list();
+                kernel_arch.integer.without({a0, a1, a2, a3, a4, a5, a6, a7});
+                rvv::buffer::architecture_t arch = kernel_arch;
+                rvv::buffer::buffer_pool_t pool(arch);
+                const tuning_t tuning(machine_of(vlen));
+                ASSERT_TRUE(pool.configure_vectors(tuning.vector_layout(p)));
+                const auto epilogue = [&](int mb) {
+                    linalg::matmul::needs_t needs;
+                    EXPECT_TRUE(linalg::matmul::chain_needs(p, mb, 1, needs));
+                    return needs;
+                };
+                tuned_t asked;
+                ASSERT_TRUE(tuning(p, pool, epilogue, asked))
+                        << "vlen=" << vlen << " flags=" << flags;
+
+                host_model_env_t env(kernel_arch, machine_of(vlen));
+                rvv::linalg::matmul::impl_t impl(env.pm);
+                linalg::matmul::matmul_t matmul(impl);
+                ASSERT_TRUE(matmul.init(p))
+                        << "vlen=" << vlen << " flags=" << flags;
+                EXPECT_EQ(impl.mb, asked.mb);
+                EXPECT_EQ(impl.nb, asked.nb);
+                EXPECT_EQ(impl.m_grain, asked.m_grain);
+            }
         }
     }
 }

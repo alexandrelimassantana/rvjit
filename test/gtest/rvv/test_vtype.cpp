@@ -92,16 +92,54 @@ TEST(vtype_jit, keep_vl_scales_the_output_lmul) {
     expect_matching_pairs(kernel, 4);
 }
 
-/// A width whose LMUL would be fractional emits nothing
-TEST(vtype_jit, keep_vl_rejects_a_fractional_lmul) {
+/// A width narrower than a whole register takes the fractional LMUL keeping
+/// the SEW/LMUL ratio, and so the vector length
+TEST(vtype_jit, keep_vl_takes_a_fractional_lmul) {
     rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
         model_env_t env(gen);
         env.pm.vtype.for_uniform(SEW::e32, LMUL::m1);
-        EXPECT_FALSE(env.pm.set_vtype_keep_vl(SEW::e16));
+        const VTA vt = env.pm.vtype.vt;
+        const VMA vm = env.pm.vtype.vm;
+        EXPECT_TRUE(env.pm.set_vtype_keep_vl(SEW::e16));
+        gen.vsetvli(x0, x0, SEW::e16, LMUL::mf2, vt, vm);
+        EXPECT_TRUE(env.pm.set_vtype_keep_vl(SEW::e8));
+        gen.vsetvli(x0, x0, SEW::e8, LMUL::mf4, vt, vm);
+
+        env.pm.vtype.for_uniform(SEW::e32, LMUL::m2);
+        EXPECT_TRUE(env.pm.set_vtype_keep_vl(SEW::e8));
+        gen.vsetvli(x0, x0, SEW::e8, LMUL::mf2, vt, vm);
+        gen.ret();
+    });
+    ASSERT_TRUE(kernel.create_kernel());
+    expect_matching_pairs(kernel, 3);
+}
+
+/// A width whose LMUL would exceed m8 emits nothing
+TEST(vtype_jit, keep_vl_rejects_a_group_beyond_m8) {
+    rv64_jit_probe_t kernel([](rv64_jit_test_generator_t &gen) {
+        model_env_t env(gen);
+        env.pm.vtype.for_uniform(SEW::e8, LMUL::m2);
+        EXPECT_FALSE(env.pm.set_vtype_keep_vl(SEW::e64));
         gen.ret();
     });
     ASSERT_TRUE(kernel.create_kernel());
     EXPECT_EQ(kernel.getSize(), sizeof(uint32_t));
+}
+
+/// The fraction-aware helpers count a fractional LMUL as one register of
+/// fewer elements
+TEST(vtype_config, fractional_lmul_helpers) {
+    EXPECT_TRUE(lmul_for(1, 2) == LMUL::mf2);
+    EXPECT_TRUE(lmul_for(1, 8) == LMUL::mf8);
+    EXPECT_TRUE(lmul_for(4, 2) == LMUL::m2);
+    EXPECT_TRUE(lmul_for(4) == LMUL::m4);
+    EXPECT_TRUE(lmul_for(3) == LMUL::m1);
+    EXPECT_TRUE(lmul_for(LMUL::mf2, SEW::e16, SEW::e32) == LMUL::m1);
+    EXPECT_TRUE(lmul_for(LMUL::m1, SEW::e32, SEW::e16) == LMUL::mf2);
+    EXPECT_EQ(vgroup_size(LMUL::mf4), 1);
+    EXPECT_EQ(lmul_fraction(LMUL::mf4), 4);
+    EXPECT_EQ(lmul_fraction(LMUL::m2), 1);
+    EXPECT_EQ(get_maximum_vector_length(256, SEW::e16, LMUL::mf2), 64);
 }
 
 /// set_vtype with a default (invalid) avl emits nothing

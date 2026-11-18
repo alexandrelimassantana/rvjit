@@ -163,8 +163,9 @@ TEST(typecast_configure, requires_a_vector_state_hint) {
     EXPECT_TRUE(tc.empty());
 }
 
-/// A position whose LMUL would be fractional is rejected
-TEST(typecast_configure, rejects_fractional_groups) {
+/// A position narrower than the group takes the fractional LMUL keeping the
+/// vector length
+TEST(typecast_configure, takes_fractional_groups) {
     Xbyak_riscv::CodeGenerator gen;
     env_t env(gen);
     rvv::conversion::conversion_t cv(env.e);
@@ -172,7 +173,22 @@ TEST(typecast_configure, rejects_fractional_groups) {
     vt.for_uniform(SEW::e64, LMUL::m1);
     rvv::typecast::typecast_t tc(cv, env.e, vt);
     const conversion::op_t op(type_t::s8, type_t::s64, form_t::vector);
-    EXPECT_FALSE(tc.configure(op, operand_t(form_t::vector, type_t::s64)));
+    ASSERT_TRUE(tc.configure(op, operand_t(form_t::vector, type_t::s64)));
+    EXPECT_EQ(tc.config(0).lmul, LMUL::mf2);
+    EXPECT_EQ(tc.config(1).lmul, LMUL::mf4);
+    EXPECT_EQ(tc.config(2).lmul, LMUL::mf8);
+}
+
+/// A position whose LMUL would exceed m8 is rejected
+TEST(typecast_configure, rejects_groups_beyond_m8) {
+    Xbyak_riscv::CodeGenerator gen;
+    env_t env(gen);
+    rvv::conversion::conversion_t cv(env.e);
+    rvv::vtype_t vt;
+    vt.for_uniform(SEW::e8, LMUL::m2);
+    rvv::typecast::typecast_t tc(cv, env.e, vt);
+    const conversion::op_t op(type_t::s64, type_t::s8, form_t::vector);
+    EXPECT_FALSE(tc.configure(op, operand_t(form_t::vector, type_t::s8)));
     EXPECT_FALSE(tc.is_valid());
     EXPECT_TRUE(tc.empty());
 }

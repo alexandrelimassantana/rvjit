@@ -177,12 +177,27 @@ inline bool is_callee_saved_gpr(name_t id) {
 /// The number of vector registers in a group for a given LMUL setting
 ///
 /// @param m The LMUL setting
+///
+/// @note A fractional LMUL counts as the one register it is stored in; its
+///     element count is `lmul_fraction`'s business
 inline int vgroup_size(const LMUL &m) {
     switch (m) {
         case LMUL::m1: return 1;
         case LMUL::m2: return 2;
         case LMUL::m4: return 4;
         case LMUL::m8: return 8;
+        default: return 1;
+    }
+}
+
+/// The denominator of a fractional LMUL setting, 1 for a whole one
+///
+/// @param m The LMUL setting
+inline int lmul_fraction(const LMUL &m) {
+    switch (m) {
+        case LMUL::mf2: return 2;
+        case LMUL::mf4: return 4;
+        case LMUL::mf8: return 8;
         default: return 1;
     }
 }
