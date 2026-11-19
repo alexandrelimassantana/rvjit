@@ -272,6 +272,14 @@ bool case_is_consistent(const matmul_case_t &c) {
             && need(c.shape_k, c.k_blk, c.k_max, "k");
 }
 
+/// The 64-bit argument holding a runtime scalar of type `dt`, whose bytes above
+/// the type's width are set so that reading past it changes the result
+uint64_t runtime_scalar(double v, dtype_t dt) {
+    const int bits = 8 * static_cast<int>(dtype_bytes(dt));
+    const uint64_t above = bits < 64 ? ~uint64_t(0) << bits : 0;
+    return scalar_bits(v, dt) | above;
+}
+
 /// Calls the kernel for the whole problem, or once per M/N chunk of at most
 /// `m_max`/`n_max` when M/N are `less_eq`, and once per K block of `kblock`
 ///
@@ -295,7 +303,7 @@ void run_kernel(const matmul_case_t &c, const matmul_kernel_t &kernel,
     args.lda = layout.lda() * a_bytes;
     args.ldb = layout.ldb() * b_bytes;
     args.ldc = layout.ldc() * c_bytes;
-    args.alpha_bits = scalar_bits(c.alpha, c.epi());
+    args.alpha_bits = runtime_scalar(c.alpha, c.epi());
     for (int64_t k0 = 0; k0 < c.k; k0 += k_step) {
         const bool first = k0 == 0;
         const bool last = k0 + k_step >= c.k;
@@ -308,7 +316,7 @@ void run_kernel(const matmul_case_t &c, const matmul_kernel_t &kernel,
             if (!first) beta = 1.0;
         }
         args.rt_flags = word;
-        args.beta_bits = scalar_bits(beta, c.epi());
+        args.beta_bits = runtime_scalar(beta, c.epi());
         for (int64_t n0 = 0; n0 < c.n; n0 += n_step) {
             for (int64_t m0 = 0; m0 < c.m; m0 += m_step) {
                 args.m = std::min(m_step, c.m - m0);

@@ -24,6 +24,8 @@
 
 #include "rvjit/interface/isa/operation/arithmetic.hpp"
 #include "rvjit/interface/isa/operation/control_flow.hpp"
+#include "rvjit/interface/isa/operation/memory.hpp"
+#include "rvjit/interface/isa/pointer.hpp"
 #include "rvjit/interface/isa/register.hpp"
 #include "rvjit/interface/linalg/matmul/postop.hpp"
 #include "rvjit/interface/stream/memory/input_stream.hpp"
@@ -107,7 +109,8 @@ inline type_t bits_type(type_t dt) {
 }
 
 /// A scalar held as bits in an integer register and, for a float type,
-/// moved into a float register when it is used
+/// moved into a float register when it is used; a runtime scalar in memory is
+/// instead loaded in its own type, straight into the register it is used from
 struct scalar_t {
     static constexpr const char *NAME = "rvjit::linalg::matmul::postop";
 
@@ -136,14 +139,22 @@ struct scalar_t {
     /// @param env The environment of the matmul
     /// @param p The parameter
     /// @param x The register holding the bits
+    ///
+    /// @note A scalar in memory is not read here: `x` is only reserved for
+    ///     its bits, which `bits` loads
     bool plan(postop_env_t &env, const scalar_parameter_t &p, const reg_t &x) {
         dt_ = env.plan.epi_type();
+        in_memory_ = false;
         if (p.has_literal()) {
             int64_t bits = 0;
             CHECK(scalar_bits(p.literal(), dt_, bits),
                     "an unrepresentable literal scalar");
             var_ = env.pm.isa().buffers().new_variable(
                     source_t::immediate(static_cast<int>(bits)), x);
+        } else if (p.source().is_load()) {
+            ptr_ = p.source().memory();
+            in_memory_ = true;
+            var_ = env.pm.isa().buffers().new_variable(source_t::none(), x);
         } else {
             var_ = env.pm.isa().buffers().new_variable(p.source(), x);
         }
@@ -152,28 +163,53 @@ struct scalar_t {
         return true;
     }
 
-    /// Loads the bits unless `loaded`, and returns the register holding the
-    /// scalar
+    /// The variable holding the bits, loaded in an integer register of the
+    /// scalar's width when the scalar is in memory
     ///
     /// @param env The environment of the matmul
-    /// @param f The float register a float scalar is moved into
+    ///
+    /// @note A literal or register scalar is materialized by whatever uses
+    ///     the variable
+    const variable_t &bits(postop_env_t &env) const {
+        if (!in_memory_) return var_;
+        const auto load
+                = env.pm.isa().memory().load(form_t::scalar, bits_type(dt_));
+        load(reg_name(var_.buffer()), ptr_);
+        return var_;
+    }
+
+    /// Returns the register holding the scalar, loading it unless `loaded`
+    ///
+    /// @param env The environment of the matmul
+    /// @param f The float register a float scalar is held in
     /// @param loaded Whether the bits were loaded already
+    ///
+    /// @details A float scalar in memory is loaded into `f` in its own type
     name_t load(postop_env_t &env, const freg_t &f, bool loaded = false) const {
+        if (in_memory_) {
+            if (float_) {
+                const auto load
+                        = env.pm.isa().memory().load(form_t::scalar, dt_);
+                load(reg_name(f), ptr_);
+                return reg_name(f);
+            }
+            if (!loaded) bits(env);
+            return reg_name(var_.buffer());
+        }
         if (!loaded) env.pm.isa().transfer().init(var_);
         if (!float_) return reg_name(var_.buffer());
-        const auto bits = env.pm.isa().arithmetic().bitcast(
+        const auto to_float = env.pm.isa().arithmetic().bitcast(
                 {form_t::scalar, dt_}, {form_t::scalar, bits_type(dt_)});
-        bits(reg_name(f), reg_name(var_.buffer()));
+        to_float(reg_name(f), reg_name(var_.buffer()));
         return reg_name(f);
     }
 
-    /// The variable holding the bits
-    const variable_t &variable() const { return var_; }
-
 private:
     variable_t var_;
+    pointer_t ptr_;
     type_t dt_ = type_t::f32;
     bool float_ = true;
+    bool in_memory_ = false;
 };
 
 /// Scales the accumulators by alpha
@@ -341,9 +377,8 @@ struct accumulate_t : public postop_t {
         }
         const freg_t f
                 = env.scratch.floats.size() > 0 ? env.scratch.f(0) : freg_t();
-        pm.isa().control_flow().if_(
-                control_flow::branch_t::nez(
-                        beta_.variable(), control_flow::distance_t::short_),
+        pm.isa().control_flow().if_(control_flow::branch_t::nez(beta_.bits(env),
+                                            control_flow::distance_t::short_),
                 [&] { body(beta_.load(env, f, /*loaded=*/true)); });
         return true;
     }
