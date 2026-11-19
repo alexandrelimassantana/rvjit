@@ -37,7 +37,8 @@ using on_bad_t = std::function<void(int64_t idx, double got, double ref)>;
 
 /// Compares `got[i]` against `ref[i]` for `i` in `[0, n)` under `atol`/`rtol`
 ///
-/// @details `on_bad`, if set, is invoked once per out-of-tolerance element
+/// @details `on_bad`, if set, is invoked once per out-of-tolerance element. A
+///     NaN is in tolerance only against a NaN
 inline compare_result_t compare(const double *got, const double *ref, int64_t n,
         double atol, double rtol, const on_bad_t &on_bad = nullptr) {
     compare_result_t r;
@@ -47,7 +48,10 @@ inline compare_result_t compare(const double *got, const double *ref, int64_t n,
         const double rel = err / std::max(std::fabs(ref[i]), 1e-6);
         r.max_abs_err = std::max(r.max_abs_err, err);
         r.max_rel_err = std::max(r.max_rel_err, rel);
-        if (err > atol + rtol * std::fabs(ref[i])) {
+        const bool nan = std::isnan(got[i]) || std::isnan(ref[i]);
+        const bool bad = nan ? std::isnan(got[i]) != std::isnan(ref[i])
+                             : err > atol + rtol * std::fabs(ref[i]);
+        if (bad) {
             ++r.n_bad;
             if (on_bad) on_bad(i, got[i], ref[i]);
         }
