@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 
-project(rvjit LANGUAGES CXX VERSION 0.2.0)
+project(rvjit LANGUAGES CXX VERSION 0.2.1)
 
 option(RVJIT_BUILD_TESTS "Build the rvjit gtest suite" ON)
 option(RVJIT_BUILD_BENCH "Build the rvjit component benchmarks/examples" ON)
