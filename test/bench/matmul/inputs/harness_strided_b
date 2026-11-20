@@ -1,0 +1,28 @@
+# B's rows far apart (a stride of 2048 elements or more, or a power-of-two
+# factor of 8 KiB), where the tuning takes a wider group and fewer
+# accumulators. Literal and runtime strides, a literal, a bounded and an unbounded M.
+--reset
+--ld=literal,runtime --dt=f32,f16:f16:f32
+--ldb=2048,4096,2304
+2v+5x7x13_n"strided_b"
+
+--reset
+--ld=literal,runtime
+--dt=s8:s8:s32 --areg=s32 --breg=s32 --acc=s32
+--ldb=2048,4096,2304
+2v+5x7x13_n"strided_b_s8"
+
+--reset
+--ld=literal,runtime --dt=f32,f16:f16:f32
+--ldb=8192 --post=alpha+beta+bias
+2v+5x7x13_n"strided_b_post"
+
+--reset
+--shape=less_eq --m_max=v --n_max=3 --dt=f32,f16:f16:f32
+--ldb=4096
+2vx7x13_n"strided_b_less_eq"
+
+--reset
+--shape=less_eq,runtime --m_max=3v --n_max=7 --dt=f32,f16:f16:f32
+--ldb=4096
+2v+5x7x13_n"strided_b_runtime_m"

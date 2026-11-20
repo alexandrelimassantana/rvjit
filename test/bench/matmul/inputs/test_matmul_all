@@ -10,6 +10,7 @@
 --batch=harness_runtime_tails
 --batch=harness_shape_sources
 --batch=harness_ld_sources
+--batch=harness_strided_b
 --batch=harness_lmul_unroll
 --batch=harness_branch_distance
 --batch=harness_dtypes
