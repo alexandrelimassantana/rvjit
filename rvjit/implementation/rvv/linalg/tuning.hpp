@@ -220,7 +220,10 @@ struct tuning_t {
     ///     `v0`'s included unless it needs the mask, and only a minimum that
     ///     does not fit shrinks them. An unpinned M takes at most `mb_max`
     ///     vectors, and is unrolled only when the integer registers left after
-    ///     the epilogue's reach `m_unroll_min_ints`
+    ///     the epilogue's reach `m_unroll_min_ints`. When B's rows are far
+    ///     apart (`strided_`) and a bounded M spans two tiles, it takes two tiles beside
+    ///     at most four accumulators, as many as fit, unless the columns of a
+    ///     call fit in one pass of that many
     bool operator()(const rvjit::linalg::matmul::plan_t &given,
             rvjit::buffer::buffer_pool_t &pool,
             const std::function<rvjit::linalg::matmul::needs_t(int)> &epilogue,
@@ -340,15 +343,40 @@ struct tuning_t {
         const int a_group = layout.in;
         const bool wide_a = a_group > vgroup_size(vt.lmuli);
         const int nregs = get_nvgroups(LMUL::m1);
-        while (m_ur > 1) {
-            const bool fits_pool = pool.vectors().may_reserve(out.nb * m_ur, 2)
-                    && (!wide_a
-                            || out.nb * m_ur * group + m_ur * a_group <= nregs);
+        const auto fits = [&](int nb, int mr) {
+            const bool fits_pool = pool.vectors().may_reserve(nb * mr, 2)
+                    && (!wide_a || nb * mr * group + mr * a_group <= nregs);
             const bool fits_epilogue
-                    = out.nb * m_ur + epilogue_groups(m_ur) <= out_groups;
-            const int ints = pool.integers().available() - needs(m_ur).ints;
+                    = nb * mr + epilogue_groups(mr) <= out_groups;
+            const int ints = pool.integers().available() - needs(mr).ints;
             const bool fits_ints = m_pinned || ints >= m_unroll_min_ints;
-            if (fits_pool && fits_epilogue && fits_ints) break;
+            return fits_pool && fits_epilogue && fits_ints;
+        };
+
+        // The most accumulators beside two tiles of M
+        static constexpr int nb_max_strided = 4;
+        // The caller pinned neither the M nor the N block
+        const bool unpinned = !m_pinned && p.blocks.nb == 0;
+        // M is bounded and spans at least two tiles
+        const bool m_spans_two = p.m.has_bound() && m_ur >= 2;
+        // The columns of a call fit in one pass of the accumulators
+        const bool one_pass = p.n.has_bound() && p.n.bound() <= nb_max_strided;
+        // B's rows are far apart (`strided_`)
+        const bool far_apart = strided_(p);
+        // The vectors are shorter than 2048 bits
+        const bool short_vectors = model_.vlenb * 8 < vlong_bits_;
+        const bool two_tiles = unpinned && m_spans_two && !one_pass && far_apart
+                && short_vectors;
+        if (two_tiles) {
+            m_ur = 2;
+            for (int nb = std::min(out.nb, nb_max_strided); nb >= 1; --nb) {
+                if (!fits(nb, m_ur)) continue;
+                out.nb = nb;
+                break;
+            }
+        }
+        while (m_ur > 1) {
+            if (fits(out.nb, m_ur)) break;
             CHECK(!m_pinned, "a pinned M block of %d vectors that does not fit",
                     p.blocks.mb);
             --m_ur;
@@ -360,6 +388,28 @@ struct tuning_t {
 private:
     // Vector length (bits) from which an LMUL group and the N block are capped
     static constexpr int vlong_bits_ = 2048;
+
+    /// Whether the rows of a non-transposed B are far apart
+    ///
+    /// @param p The plan
+    ///
+    /// @details Each K step reads one scalar from each of B's rows, `ldb`
+    ///     bytes apart. B is far apart when `ldb` spans at least 2048 elements
+    ///     or has a power-of-two factor of at least 8 KiB. An unknown `ldb` is
+    ///     not far apart
+    bool strided_(const rvjit::linalg::matmul::plan_t &p) const {
+        // The stride, in elements, from which B is far apart
+        static constexpr int strided_ldb_elems = 2048;
+        // The power-of-two factor of the stride, in bytes, from which it is
+        static constexpr int aliased_ldb_factor_hard = 8192;
+        // A transposed B or an unknown stride is not far apart
+        if (p.is_transb || !p.ldb.is_literal()) return false;
+        const int ldb = p.ldb.value();
+        const int elem = rvjit::sewb(p.dtb.mem);
+        if (ldb <= 0 || elem <= 0) return false;
+        return ldb / elem >= strided_ldb_elems
+                || (ldb & -ldb) >= aliased_ldb_factor_hard;
+    }
 
     /// The SEW and LMUL pair `p` runs at, as `vtype_of` describes
     ///

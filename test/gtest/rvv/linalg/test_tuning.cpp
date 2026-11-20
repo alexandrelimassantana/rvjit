@@ -819,4 +819,196 @@ TEST(tuning_agreement, a_long_vector_kernel_uses_the_tuned_blocks) {
     }
 }
 
+namespace {
+
+// `p` with B's stride, in bytes
+plan_t with_ldb(plan_t p, int ldb) {
+    p.ldb = parameter_t(ldb);
+    return p;
+}
+
+// A plan of `a` into `c` whose M spans `m` elements at B's stride `ldb`
+plan_t strided_plan(
+        const type_parameter_t &a, const type_parameter_t &c, int m, int ldb) {
+    return with_ldb(typed_plan(a, c, size_parameter_t::literal(m)), ldb);
+}
+
+} // namespace
+
+/// Far apart rows of B, with M spanning two tiles, take two tiles beside three
+/// accumulators, at the default group
+TEST(tuning_strided_b, a_far_apart_b_takes_two_tiles_and_three_accumulators) {
+    tuned_t t;
+    rvjit::buffer::vector_layout_t layout;
+
+    // 16 KiB: 4096 elements and a power-of-two factor
+    ASSERT_TRUE(tune_at(256,
+            strided_plan(type_t::f32, type_t::f32, 2 * F32_VL, 16384), t,
+            layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m4);
+    EXPECT_EQ(t.mb, 2);
+    EXPECT_EQ(t.nb, 3);
+    EXPECT_EQ(t.kb, 8);
+    EXPECT_EQ(t.m_grain, F32_VL);
+
+    // 17 KiB: no aliasing, 4352 elements
+    ASSERT_TRUE(tune_at(256,
+            strided_plan(type_t::f32, type_t::f32, 2 * F32_VL, 17408), t,
+            layout));
+    EXPECT_EQ(t.mb, 2);
+    EXPECT_EQ(t.nb, 3);
+
+    // Widening inputs keep their m2 into m4, and the integer ones their s16
+    ASSERT_TRUE(tune_at(256,
+            strided_plan(type_t::f16, type_t::f32, 2 * F32_VL, 4096), t,
+            layout));
+    EXPECT_TRUE(t.vtype.lmulo == LMUL::m4);
+    EXPECT_EQ(t.mb, 2);
+    EXPECT_LE(t.nb, 4);
+    ASSERT_TRUE(tune_at(256, strided_plan(s8_in, type_t::s32, 2 * F32_VL, 4096),
+            t, layout));
+    EXPECT_EQ(t.mb, 2);
+    EXPECT_LE(t.nb, 4);
+
+    // A runtime M spans the tiles its upper bound does
+    plan_t bounded
+            = with_ldb(typed_plan(type_t::f32, type_t::f32,
+                               size_parameter_t::less_eq(a3, 8 * F32_VL)),
+                    16384);
+    ASSERT_TRUE(tune_at(256, bounded, t, layout));
+    EXPECT_EQ(t.mb, 2);
+    EXPECT_EQ(t.nb, 3);
+}
+
+/// One tile of M beside the most accumulators is tuned for a stride that is not
+/// far apart or unknown, a transposed B, one tile of M, an unbounded M, long
+/// vectors and a pinned block
+TEST(tuning_strided_b, one_tile_is_tuned_elsewhere) {
+    tuned_t t, plain;
+    rvjit::buffer::vector_layout_t layout;
+    const plan_t m2 = strided_plan(type_t::f32, type_t::f32, 2 * F32_VL, 16384);
+
+    // 4 KiB is 1024 elements of f32
+    ASSERT_TRUE(tune_at(256,
+            strided_plan(type_t::f32, type_t::f32, 2 * F32_VL, 4096), t,
+            layout));
+    EXPECT_GT(t.nb, 4);
+
+    plan_t runtime = m2;
+    runtime.ldb = parameter_t(source_t(a6));
+    ASSERT_TRUE(tune_at(256, runtime, t, layout));
+    EXPECT_GT(t.nb, 4);
+
+    plan_t transposed = m2;
+    transposed.is_transb = true;
+    ASSERT_TRUE(tune_at(256, transposed, t, layout));
+    EXPECT_NE(t.nb, 3);
+
+    // Columns that fit one pass of four accumulators keep one tile
+    plan_t few = m2;
+    few.n = size_parameter_t::less_eq(a4, 4);
+    ASSERT_TRUE(tune_at(256, few, t, layout));
+    EXPECT_EQ(t.mb, 1);
+    EXPECT_EQ(t.nb, 4);
+    few.n = size_parameter_t::less_eq(a4, 5);
+    ASSERT_TRUE(tune_at(256, few, t, layout));
+    EXPECT_EQ(t.mb, 2);
+
+    // A runtime M without a bound spans one tile
+    plan_t unbounded = with_ldb(typed_plan(type_t::f32, type_t::f32), 16384);
+    ASSERT_TRUE(tune_at(256, unbounded, t, layout));
+    EXPECT_EQ(t.mb, 1);
+    EXPECT_GT(t.nb, 4);
+
+    // One tile of M leaves no room for a second
+    ASSERT_TRUE(tune_at(256,
+            strided_plan(type_t::f32, type_t::f32, F32_VL, 16384), t, layout));
+    EXPECT_EQ(t.mb, 1);
+    EXPECT_GT(t.nb, 4);
+
+    // 2048-bit vectors
+    ASSERT_TRUE(tune_at(2048, m2, t, layout));
+    ASSERT_TRUE(tune_at(2048, with_ldb(m2, 256), plain, layout));
+    EXPECT_EQ(t.mb, plain.mb);
+    EXPECT_EQ(t.nb, plain.nb);
+
+    // A pinned N block is honored as it is
+    plan_t pinned = m2;
+    pinned.blocks.nb = 5;
+    ASSERT_TRUE(tune_at(256, pinned, t, layout));
+    EXPECT_EQ(t.nb, 5);
+}
+
+/// Most plans keep one tile with the most accumulators, and the choice switches
+/// to two tiles beside fewer only for far apart rows of B with M spanning two
+/// tiles, whatever the data type
+TEST(tuning_strided_b, the_choice_switches_with_the_stride_and_m) {
+    const type_parameter_t types[][2] = {{type_t::f32, type_t::f32},
+            {type_t::f16, type_t::f32}, {s8_in, type_t::s32}};
+    const int strides[]
+            = {16, 64, 128, 256, 512, 1024, 1536, 2047, 2048, 2560, 4096, 8192};
+    const int ms[] = {F32_VL, 2 * F32_VL, 8 * F32_VL, 0};
+    int one_tile = 0, two_tiles = 0;
+    for (const auto &ty : types) {
+        // The default: one tile beside the most accumulators
+        tuned_t base;
+        rvjit::buffer::vector_layout_t layout;
+        ASSERT_TRUE(tune_at(256,
+                with_ldb(typed_plan(ty[0], ty[1],
+                                 size_parameter_t::literal(8 * F32_VL)),
+                        256),
+                base, layout));
+        ASSERT_EQ(base.mb, 1);
+        ASSERT_GE(base.nb, 5);
+
+        for (int el : strides) {
+            const int ldb = el * rvjit::sewb(ty[0].mem);
+            const bool far_apart = el >= 2048;
+            for (int m : ms) {
+                SCOPED_TRACE(testing::Message()
+                        << "elements=" << el << " m=" << m
+                        << " mem=" << static_cast<int>(ty[0].mem));
+                plan_t p = m ? strided_plan(ty[0], ty[1], m, ldb)
+                             : with_ldb(typed_plan(ty[0], ty[1]), ldb);
+                tuned_t t;
+                ASSERT_TRUE(tune_at(256, p, t, layout));
+                if (far_apart && m != F32_VL && m != 0) {
+                    EXPECT_EQ(t.mb, 2);
+                    EXPECT_LT(t.nb, base.nb);
+                    EXPECT_GE(t.nb, 2);
+                    ++two_tiles;
+                } else {
+                    EXPECT_EQ(t.mb, base.mb);
+                    EXPECT_EQ(t.nb, base.nb);
+                    ++one_tile;
+                }
+            }
+        }
+    }
+    // Both choices occur, and the default is the common one
+    EXPECT_GT(two_tiles, 0);
+    EXPECT_GT(one_tile, 2 * two_tiles);
+}
+
+/// A tile that the kernel then generates for is the one the tuning returned
+TEST(tuning_strided_b, the_two_tile_kernel_uses_the_tuned_blocks) {
+    const plan_t p = strided_plan(type_t::f32, type_t::f32, 2 * F32_VL, 16384);
+    rvv::buffer::architecture_t kernel_arch
+            = rvv::buffer::architecture_t::default_list();
+    rvv::buffer::buffer_pool_t pool(kernel_arch);
+    const tuning_t tuning(machine());
+    ASSERT_TRUE(pool.configure_vectors(tuning.vector_layout(p)));
+    tuned_t asked;
+    ASSERT_TRUE(tuning(p, pool, {}, asked));
+    ASSERT_EQ(asked.mb, 2);
+
+    host_model_env_t env(kernel_arch, machine());
+    rvv::linalg::matmul::impl_t impl(env.pm);
+    linalg::matmul::matmul_t matmul(impl);
+    ASSERT_TRUE(matmul.init(p));
+    EXPECT_EQ(impl.mb, asked.mb);
+    EXPECT_EQ(impl.nb, asked.nb);
+    EXPECT_EQ(impl.m_grain, asked.m_grain);
+}
+
 } // namespace rvjit
